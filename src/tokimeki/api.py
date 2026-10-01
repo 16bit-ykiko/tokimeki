@@ -71,8 +71,12 @@ def song_analyze(
     lyrics: str | None = None,
     instrumental: str | None = None,
     span: str | None = None,
+    instrumental_track: int | None = None,
 ) -> Json:
-    """Beats, bars, sections, energy, the excerpt and suggested slots of a song; stored."""
+    """Beats, bars, sections, energy, the excerpt and suggested slots of a song; stored.
+
+    The vocal line comes from separating the mix; lyrics or an instrumental are optional hints.
+    """
     try:
         analysis = analyse_song(
             Path(audio).expanduser(),
@@ -80,6 +84,7 @@ def song_analyze(
             Path(lyrics).expanduser() if lyrics else None,
             Path(instrumental).expanduser() if instrumental else None,
             parse_range(span) if span else None,
+            instrumental_track,
         )
     except SongError as error:
         raise ApiError(str(error)) from error

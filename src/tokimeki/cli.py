@@ -111,7 +111,8 @@ def cmd_song_analyze(args: argparse.Namespace) -> int:
     lyrics: str | None = args.lyrics
     instrumental: str | None = args.instrumental
     span: str | None = args.range
-    return _emit(lambda: api.song_analyze(audio, track, lyrics, instrumental, span))
+    backing_track: int | None = args.instrumental_track
+    return _emit(lambda: api.song_analyze(audio, track, lyrics, instrumental, span, backing_track))
 
 
 def cmd_song_show(args: argparse.Namespace) -> int:
@@ -249,8 +250,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.set_defaults(handler=cmd_song_analyze)
     analyze.add_argument("audio", help="any audio file (a .cue picks a track of a CD image)")
     analyze.add_argument("--track", type=int, help="track of a .cue sheet (default 1)")
-    analyze.add_argument("--lyrics", help="an LRC file: gives the vocal line and lyric times")
-    analyze.add_argument("--instrumental", help="the song without vocals, for the vocal line")
+    analyze.add_argument("--lyrics", help="hint: an LRC file, for the vocal line and lyric times")
+    analyze.add_argument(
+        "--instrumental", help="hint: the song without vocals (default: separate the mix)"
+    )
+    analyze.add_argument(
+        "--instrumental-track", type=int, help="hint: the instrumental's track of the same .cue"
+    )
     analyze.add_argument("--range", help="the excerpt, e.g. 0:58-1:21 (default: through chorus 1)")
     show = song_sub.add_parser("show", help="print a stored analysis")
     show.set_defaults(handler=cmd_song_show)

@@ -2,9 +2,9 @@
 an excerpt and the slots it suggests.
 
 A song is an audio file (a track of a `.cue` image is a convenience). The vocal line, which
-places the intro, the sung sections and the outro, comes from an LRC lyrics file or an
-instrumental version when one is given; without either, sections rest on how the music
-changes and how loud it is. Analyses live in a song store shared by every series
+places the intro, the sung sections and the outro, comes from the mix itself by vocal
+separation (MDX-Net on the GPU); an LRC lyrics file or an instrumental version, when given,
+are used instead. Analyses live in a song store shared by every series
 (`$TOKIMEKI_HOME/songs`, by default `~/.local/share/tokimeki/songs`), one per song id.
 """
 
@@ -23,8 +23,12 @@ from numpy.typing import NDArray
 
 from tokimeki.media.audio import decode_audio
 from tokimeki.media.cue import read_cue
-from tokimeki.models.beats import FPS, SAMPLE_RATE, BeatTracker, mel_centres
+from tokimeki.models.beats import FPS, SAMPLE_RATE, Beats, BeatTracker, mel_centres
 from tokimeki.models.gpu import loaded
+from tokimeki.models.separation import FPS as SEPARATION_FPS
+from tokimeki.models.separation import MODEL_FILE as SEPARATION_MODEL
+from tokimeki.models.separation import SAMPLE_RATE as SEPARATION_RATE
+from tokimeki.models.separation import VocalSeparator
 from tokimeki.song import structure
 from tokimeki.song.lyrics import LyricLine, read_lrc
 from tokimeki.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
@@ -32,7 +36,6 @@ from tokimeki.song.structure import Section
 
 ANALYSIS_VERSION = 2
 UNLIMITED = 1_000_000
-_INSTRUMENTAL = re.compile(r"\((instrumental|off vocal|karaoke)\)\s*$", re.IGNORECASE)
 
 type Json = dict[str, object]
 
@@ -65,7 +68,7 @@ class SongAnalysis:
     vocal: list[float] | None
     """Share of each bar that is sung; None when no vocal line was available."""
     vocal_source: str
-    """"lyrics", "instrumental" or "none"."""
+    """"lyrics", "instrumental", "separation" or "none"."""
     sections: list[Section]
     lyrics: list[LyricLine]
     excerpt: tuple[float, float] = (0.0, 0.0)
@@ -173,34 +176,18 @@ def _probe(path: Path) -> tuple[float, str]:
     return float(str(fmt.get("duration", "0"))), title
 
 
-def resolve(path: Path, track: int | None = None) -> tuple[SongSource, SongSource | None]:
-    """The song at `path`, and the CD image's instrumental of it when `path` is a `.cue`
-    whose sheet has a track titled "<title> (Instrumental)"."""
+def resolve(path: Path, track: int | None = None) -> SongSource:
+    """The song at `path`: an audio file, or a track (default 1) of a `.cue` CD image."""
     if not path.exists():
         raise SongError(f"{path} does not exist")
     if path.suffix.lower() != ".cue":
         duration, title = _probe(path)
-        return SongSource(path, 0.0, duration, title or path.stem), None
+        return SongSource(path, 0.0, duration, title or path.stem)
     sheet = read_cue(path)
     total, _ = _probe(sheet.file)
-    chosen = sheet.track(track or 1)
-
-    def source(number: int) -> SongSource:
-        t = sheet.track(number)
-        end = t.end if t.end is not None else total
-        return SongSource(sheet.file, t.start, end - t.start, t.title, number)
-
-    instrumental = next(
-        (
-            source(t.number)
-            for t in sheet.tracks
-            if t.number != chosen.number
-            and _INSTRUMENTAL.search(t.title)
-            and _INSTRUMENTAL.sub("", t.title).strip() == chosen.title.strip()
-        ),
-        None,
-    )
-    return source(chosen.number), instrumental
+    t = sheet.track(track or 1)
+    end = t.end if t.end is not None else total
+    return SongSource(sheet.file, t.start, end - t.start, t.title, t.number)
 
 
 def song_id(source: SongSource) -> str:
@@ -226,41 +213,64 @@ def lyrics_share(
     return np.array(out)
 
 
-def analyse(
-    source: SongSource,
-    tracker: BeatTracker,
-    instrumental: SongSource | None,
+SUNG = {"lyrics": 0.2, "instrumental": 0.2, "separation": 0.3}
+"""Per source of the vocal line, the share of a bar that makes it sung. Separation's scale
+differs: 0.3 matched the instrumental-derived line on 95.5% of MORE&MORE's bars."""
+
+
+def vocal_line(
+    bars: NDArray[np.float64],
+    end: float,
+    mix: NDArray[np.float64],
     lyrics: list[LyricLine],
-) -> SongAnalysis:
-    audio = _audio(source)
-    beats = tracker.track(audio)
-    mix = tracker.spectrogram(audio).astype(np.float64)
-    bars = structure.bar_grid(beats.beats, beats.downbeats)
-    end = len(audio) / SAMPLE_RATE
-    vocal: NDArray[np.float64] | None = None
-    vocal_source = "none"
+    backing: NDArray[np.float64] | None,
+    separated: NDArray[np.float32] | None,
+) -> tuple[NDArray[np.float64] | None, str]:
+    """Share of each bar that is sung, from the best source given, and which one it was."""
     if lyrics:
-        vocal, vocal_source = lyrics_share(lyrics, bars, end), "lyrics"
-    elif instrumental is not None:
-        backing = tracker.spectrogram(_audio(instrumental)).astype(np.float64)
+        return lyrics_share(lyrics, bars, end), "lyrics"
+    if backing is not None:
         frames = min(len(mix), len(backing))
         lag = structure.best_lag(mix[:frames].sum(axis=1), backing[:frames].sum(axis=1), 50)
-        backing = np.roll(backing[:frames], lag, axis=0)
+        aligned = np.roll(backing[:frames], lag, axis=0)
         low, high = structure.VOCAL_BAND
         centres = mel_centres()
         band = (centres >= low) & (centres <= high)
-        share = structure.vocal_share(np.expm1(mix[:frames]) / 1000, np.expm1(backing) / 1000, band)
-        vocal, vocal_source = (
-            structure.per_bar(share[:, None], FPS, bars, end)[:, 0],
-            "instrumental",
-        )
+        share = structure.vocal_share(np.expm1(mix[:frames]) / 1000, np.expm1(aligned) / 1000, band)
+        return structure.per_bar(share[:, None], FPS, bars, end)[:, 0], "instrumental"
+    if separated is not None:
+        per = separated.astype(np.float64)[:, None]
+        return structure.per_bar(per, SEPARATION_FPS, bars, end)[:, 0], "separation"
+    return None, "none"
+
+
+def assemble(
+    source: SongSource,
+    beats: Beats,
+    mix: NDArray[np.float64],
+    end: float,
+    lyrics: list[LyricLine],
+    backing: NDArray[np.float64] | None = None,
+    separated: NDArray[np.float32] | None = None,
+) -> SongAnalysis:
+    """The analysis from what the GPU models measured; pure, so it is tested without them."""
+    bars = structure.bar_grid(beats.beats, beats.downbeats)
+    vocal, vocal_source = vocal_line(bars, end, mix, lyrics, backing, separated)
     shares = vocal if vocal is not None else np.ones(len(bars))
+    sung_at = SUNG.get(vocal_source, structure.VOCAL_ON)
     loudness = structure.per_bar(mix.mean(axis=1, keepdims=True), FPS, bars, end)[:, 0]
     features = structure.per_bar(mix, FPS, bars, end)
-    starts = structure.boundaries(structure.novelty(features), shares >= structure.VOCAL_ON)
+    starts = structure.boundaries(structure.novelty(features), shares >= sung_at)
     sections = structure.merge_runs(
         structure.label_sections(
-            starts, features, shares, loudness, bars, end, vocal_known=vocal is not None
+            starts,
+            features,
+            shares,
+            loudness,
+            bars,
+            end,
+            vocal_known=vocal is not None,
+            vocal_on=sung_at,
         )
     )
     intervals = np.diff(beats.beats)
@@ -277,6 +287,32 @@ def analyse(
         sections=sections,
         lyrics=lyrics,
     )
+
+
+def measure(
+    source: SongSource, instrumental: SongSource | None, lyrics: list[LyricLine]
+) -> SongAnalysis:
+    """Run the GPU models one at a time: Beat This!, then (when neither lyrics nor an
+    instrumental give the vocal line) MDX-Net on the mix."""
+    audio = _audio(source)
+    backing: NDArray[np.float64] | None = None
+    with loaded("Beat This!", BeatTracker) as tracker:
+        beats = tracker.track(audio)
+        mix = tracker.spectrogram(audio).astype(np.float64)
+        if instrumental is not None and not lyrics:
+            backing = tracker.spectrogram(_audio(instrumental)).astype(np.float64)
+    separated: NDArray[np.float32] | None = None
+    if not lyrics and backing is None:
+        stereo = decode_audio(
+            source.path,
+            SEPARATION_RATE,
+            start=source.offset,
+            duration=source.duration,
+            channels=2,
+        )
+        with loaded("MDX-Net", VocalSeparator) as separator:
+            separated = separator.vocal_share(stereo)
+    return assemble(source, beats, mix, len(audio) / SAMPLE_RATE, lyrics, backing, separated)
 
 
 def excerpt_of(analysis: SongAnalysis, span: tuple[float, float] | None) -> Excerpt:
@@ -306,14 +342,26 @@ def analyse_song(
     lyrics: Path | None = None,
     instrumental: Path | None = None,
     span: tuple[float, float] | None = None,
+    instrumental_track: int | None = None,
 ) -> SongAnalysis:
     """Analyse a song (reusing the stored beats and sections when their inputs match), pick
-    its excerpt (`span`, or the top through the first chorus) and store the result."""
-    source, from_cue = resolve(path, track)
-    backing = resolve(instrumental)[0] if instrumental is not None else from_cue
+    its excerpt (`span`, or the top through the first chorus) and store the result.
+
+    The vocal line comes from separating the mix unless lyrics or an instrumental (a file,
+    or `instrumental_track` of the same `.cue`) are given as hints.
+    """
+    source = resolve(path, track)
+    backing: SongSource | None = None
+    if instrumental is not None:
+        backing = resolve(instrumental)
+    elif instrumental_track is not None:
+        if path.suffix.lower() != ".cue":
+            raise SongError("--instrumental-track needs a .cue sheet")
+        backing = resolve(path, instrumental_track)
     inputs = {
         "lyrics": f"{lyrics.resolve()}@{lyrics.stat().st_mtime_ns}" if lyrics else "",
         "instrumental": f"{backing.path.resolve()}|{backing.offset:.3f}" if backing else "",
+        "separation": SEPARATION_MODEL,
     }
     sid = song_id(source)
     analysis: SongAnalysis | None = None
@@ -325,9 +373,7 @@ def analyse_song(
             analysis = None
     if analysis is None:
         lines = read_lrc(lyrics) if lyrics is not None else []
-        with loaded("Beat This!", BeatTracker) as tracker:
-            analysis = analyse(source, tracker, backing, lines)
-        analysis = replace(analysis, inputs=inputs)
+        analysis = replace(measure(source, backing, lines), inputs=inputs)
     excerpt = excerpt_of(analysis, span)
     analysis = replace(analysis, excerpt=(excerpt.start, excerpt.end))
     analysis = replace(analysis, slots=suggested_slots(analysis))

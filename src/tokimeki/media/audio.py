@@ -77,8 +77,10 @@ def decode_audio(
     stream_index: int | None = None,
     start: float | None = None,
     duration: float | None = None,
+    channels: int = 1,
 ) -> NDArray[np.float32]:
-    """Mono float32 samples of one audio stream (the first by default)."""
+    """Float32 samples of one audio stream (the first by default): `(samples,)` for mono,
+    `(channels, samples)` otherwise."""
     args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "1"]
     if start is not None:
         args += ["-ss", f"{start:.6f}"]
@@ -86,8 +88,11 @@ def decode_audio(
     if duration is not None:
         args += ["-t", f"{duration:.6f}"]
     args += ["-map", f"0:{stream_index}" if stream_index is not None else "0:a:0"]
-    args += ["-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "pipe:1"]
+    args += ["-ac", str(channels), "-ar", str(sample_rate), "-f", "f32le", "pipe:1"]
     result = subprocess.run(args, capture_output=True, check=False)
     if result.returncode != 0:
         raise AudioError(f"decoding audio of {path} failed: {result.stderr.decode().strip()}")
-    return np.frombuffer(result.stdout, dtype=np.float32)
+    samples = np.frombuffer(result.stdout, dtype=np.float32)
+    if channels == 1:
+        return samples
+    return np.ascontiguousarray(samples.reshape(-1, channels).T)

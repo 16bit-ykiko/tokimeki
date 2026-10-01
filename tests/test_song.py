@@ -6,8 +6,17 @@ import pytest
 import torch
 
 from tokimeki.media.cue import cue_time, parse_cue
-from tokimeki.models.beats import chunk_starts, log_mel, mel_filters, pick_peaks, snap_downbeats
-from tokimeki.song.analysis import SongSource, lyrics_share, song_id
+from tokimeki.models.beats import (
+    Beats,
+    chunk_starts,
+    log_mel,
+    mel_filters,
+    pick_peaks,
+    snap_downbeats,
+)
+from tokimeki.models.separation import CHUNK, N_FFT, VocalSeparator, band_mask, mdx_input
+from tokimeki.models.separation import FPS as SEPARATION_FPS
+from tokimeki.song.analysis import SongSource, assemble, lyrics_share, song_id
 from tokimeki.song.lyrics import LyricLine, parse_lrc
 from tokimeki.song.slots import Excerpt, first_chorus, make_slots
 from tokimeki.song.structure import (
@@ -194,3 +203,43 @@ def test_song_ids_are_readable_and_stable(tmp_path: Path) -> None:
     assert song_id(SongSource(tmp_path / "a.flac", 232.1, 100.0, "そして君と", 2)).startswith(
         "song-"
     )
+
+
+def test_mdx_input_lays_out_left_and_right_real_and_imaginary() -> None:
+    chunk = torch.zeros(1, 2, CHUNK)
+    t = torch.arange(CHUNK) / 44100
+    chunk[0, 0] = torch.sin(2 * torch.pi * 1000 * t)
+    window = torch.hann_window(N_FFT)
+    layout = mdx_input(chunk, window)
+    assert tuple(layout.shape) == (1, 4, 3072, 256)
+    energy = (layout**2).sum(dim=(2, 3))[0]
+    assert energy[0] + energy[1] > 0 and float(energy[2] + energy[3]) == 0.0
+    assert int(band_mask(torch.device("cpu")).sum()) == pytest.approx(
+        (5000 - 200) * N_FFT / 44100, abs=1
+    )
+
+
+def test_separation_gives_the_vocal_line_when_nothing_else_does() -> None:
+    beats = Beats(np.arange(0, 16, 0.5), np.arange(0, 16, 2.0))
+    mix = np.random.default_rng(0).uniform(0, 1, (800, 128))
+    frames = int(16 * SEPARATION_FPS)
+    separated = np.zeros(frames, dtype=np.float32)
+    separated[frames // 2 :] = 0.8
+    analysis = assemble(
+        SongSource(Path("s.flac"), 0.0, 16.0, "S"), beats, mix, 16.0, [], None, separated
+    )
+    assert analysis.vocal_source == "separation"
+    assert analysis.vocal is not None and analysis.vocal[0] < 0.1 < 0.5 < analysis.vocal[-1]
+    with_lyrics = assemble(SongSource(Path("s.flac"), 0.0, 16.0, "S"), beats, mix, 16.0,
+                           [LyricLine(0.0, 4.0, "a")], None, separated)  # fmt: skip
+    assert with_lyrics.vocal_source == "lyrics"
+
+
+@pytest.mark.gpu
+def test_vocal_separator_runs_on_the_gpu() -> None:
+    separator = VocalSeparator()
+    try:
+        share = separator.vocal_share(np.zeros((2, 44100 * 3), dtype=np.float32))
+    finally:
+        separator.close()
+    assert len(share) == int(np.ceil(44100 * 3 / 1024))
