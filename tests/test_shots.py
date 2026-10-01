@@ -1,11 +1,10 @@
 from fractions import Fraction
 from pathlib import Path
 
+import fakes
 import numpy as np
 import pytest
 from clips import make_clip
-from numpy.typing import NDArray
-from PIL import Image
 
 from tokimeki.library.episodes import get_episode, stage_done
 from tokimeki.library.shots import list_shots
@@ -54,33 +53,9 @@ def test_sampling_every_half_second_and_at_least_three() -> None:
     assert sample_frames(5, 5, Fraction(24)) == []
 
 
-class FakeTransNet:
-    def predict(self, frames: NDArray[np.uint8]) -> NDArray[np.float32]:
-        p = np.zeros(len(frames), dtype=np.float32)
-        p[23] = 1.0
-        return p
-
-    def close(self) -> None:
-        pass
-
-
-def fake_decode(path: Path, width: int, height: int) -> NDArray[np.uint8]:
-    return np.zeros((48, 27, 48, 3), dtype=np.uint8)
-
-
-def fake_extract(
-    path: Path, width: int, height: int, indices: list[int], out_paths: list[Path]
-) -> None:
-    for out in out_paths:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (32, 18)).save(out)
-
-
 def test_stage_is_resumable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     make_clip(tmp_path / "ep01.mkv", ["color=c=red", "color=c=blue"])
-    monkeypatch.setattr(shots, "TransNet", FakeTransNet)
-    monkeypatch.setattr(shots, "decode_for_transnet", fake_decode)
-    monkeypatch.setattr("tokimeki.stages.frames.extract_frames", fake_extract)
+    fakes.install(monkeypatch)
     ctx = open_series(tmp_path)
     episodes = register_episodes(ctx)
     pipeline.run(ctx, episodes, until="shots")
@@ -96,7 +71,7 @@ def test_stage_is_resumable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(shots, "TransNet", None)
     pipeline.run(ctx, episodes, until="shots")
 
-    monkeypatch.setattr(shots, "TransNet", FakeTransNet)
+    monkeypatch.setattr(shots, "TransNet", fakes.FakeTransNet)
     pipeline.redo(ctx, episodes, "shots")
     assert not ctx.paths.frames_dir(episode.id).exists()
     assert list_shots(ctx.conn, episode.id) == []
