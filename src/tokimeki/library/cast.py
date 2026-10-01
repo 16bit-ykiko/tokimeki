@@ -23,8 +23,20 @@ class NewFace:
 @dataclass(frozen=True, slots=True)
 class FaceInShot:
     face: Face
+    episode_id: int
     shot_id: int
     frame_index: int
+
+
+type _FaceInShotRow = tuple[int, int, float, float, float, float, float, int | None, int, int, int]
+_FACE_IN_SHOT = (
+    f"SELECT {_FACE_COLUMNS}, s.episode_id, f.shot_id, f.frame_index"
+    " FROM faces AS fa JOIN frames AS f ON f.id = fa.frame_id JOIN shots AS s ON s.id = f.shot_id"
+)
+
+
+def _face_in_shot(row: _FaceInShotRow) -> FaceInShot:
+    return FaceInShot(_face(row[:8]), row[8], row[9], row[10])
 
 
 def _face(row: tuple[int, int, float, float, float, float, float, int | None]) -> Face:
@@ -65,28 +77,17 @@ def clear_episode_faces(conn: sqlite3.Connection, episode_id: int) -> None:
 
 
 def episode_faces(conn: sqlite3.Connection, episode_id: int) -> list[FaceInShot]:
-    rows: list[tuple[int, int, float, float, float, float, float, int | None, int, int]] = (
-        conn.execute(
-            f"SELECT {_FACE_COLUMNS}, f.shot_id, f.frame_index"
-            " FROM faces AS fa JOIN frames AS f ON f.id = fa.frame_id"
-            " JOIN shots AS s ON s.id = f.shot_id"
-            " WHERE s.episode_id = ? ORDER BY fa.id",
-            (episode_id,),
-        ).fetchall()
-    )
-    return [FaceInShot(_face(row[:8]), row[8], row[9]) for row in rows]
+    rows: list[_FaceInShotRow] = conn.execute(
+        f"{_FACE_IN_SHOT} WHERE s.episode_id = ? ORDER BY fa.id", (episode_id,)
+    ).fetchall()
+    return [_face_in_shot(row) for row in rows]
 
 
 def cluster_faces(conn: sqlite3.Connection, cluster_id: int) -> list[FaceInShot]:
-    rows: list[tuple[int, int, float, float, float, float, float, int | None, int, int]] = (
-        conn.execute(
-            f"SELECT {_FACE_COLUMNS}, f.shot_id, f.frame_index"
-            " FROM faces AS fa JOIN frames AS f ON f.id = fa.frame_id"
-            " WHERE fa.cluster_id = ? ORDER BY fa.id",
-            (cluster_id,),
-        ).fetchall()
-    )
-    return [FaceInShot(_face(row[:8]), row[8], row[9]) for row in rows]
+    rows: list[_FaceInShotRow] = conn.execute(
+        f"{_FACE_IN_SHOT} WHERE fa.cluster_id = ? ORDER BY fa.id", (cluster_id,)
+    ).fetchall()
+    return [_face_in_shot(row) for row in rows]
 
 
 def face_embeddings(conn: sqlite3.Connection, face_ids: Sequence[int]) -> Embeddings:

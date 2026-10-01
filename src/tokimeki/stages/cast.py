@@ -32,7 +32,7 @@ from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.records import Box, Episode, Frame, ShotStatus
 from tokimeki.library.shots import list_episode_frames, list_shots
-from tokimeki.media.images import load_image
+from tokimeki.media.images import load_image, square_around
 from tokimeki.models.ccip import (
     CCIP_DBSCAN_EPS,
     CCIP_DBSCAN_MIN_SAMPLES,
@@ -73,13 +73,7 @@ class FoundFace:
 def head_box(detection: Detection, width: int, height: int) -> tuple[int, int, int, int]:
     """The pixel box CCIP sees: a square around the face, raised a little to take in the hair."""
     d = detection
-    side = max((d.x1 - d.x0) * width, (d.y1 - d.y0) * height) * HEAD_CROP_SCALE
-    side = min(side, width, height)
-    cx = (d.x0 + d.x1) / 2 * width
-    cy = (d.y0 + d.y1) / 2 * height - 0.1 * side
-    x0 = min(max(cx - side / 2, 0), width - side)
-    y0 = min(max(cy - side / 2, 0), height - side)
-    return round(x0), round(y0), round(x0 + side), round(y0 + side)
+    return square_around((d.x0, d.y0, d.x1, d.y1), width, height, HEAD_CROP_SCALE, lift=0.1)
 
 
 def run(ctx: Context, episodes: Sequence[Episode]) -> None:

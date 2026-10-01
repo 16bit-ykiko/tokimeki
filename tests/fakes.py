@@ -95,3 +95,8 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(content_filter, "Wd14Tagger", FakeTagger)
     monkeypatch.setattr(cast, "FaceDetector", FakeDetector)
     monkeypatch.setattr(cast, "CcipEncoder", FakeEncoder)
+
+
+def unsafe_everything(self: FakeTagger, images: Sequence[Image.Image]) -> list[Prediction]:
+    unsafe = {"general": 0.1, "sensitive": 0.3, "questionable": 0.7, "explicit": 0.1}
+    return [Prediction(unsafe, {}, {}) for _ in images]

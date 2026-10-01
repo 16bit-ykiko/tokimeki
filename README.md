@@ -50,7 +50,11 @@ pixi run tokimeki gpu-check                                # once: is everything
 pixi run tokimeki ingest ~/anime/to-love-ru-darkness       # run every stage; reruns skip finished work
 pixi run tokimeki ingest ~/anime/to-love-ru-darkness --episode 01 --redo shots   # redo one stage (and the later ones)
 pixi run tokimeki status ~/anime/to-love-ru-darkness
+pixi run tokimeki report ~/anime/to-love-ru-darkness       # ingest rebuilds it too
+explorer.exe "$(wslpath -w ~/anime/to-love-ru-darkness/.tokimeki/report/index.html)"
 ```
+
+The report is one static page in the data directory: totals (shots, kept, dropped and the drop rate, with no images of dropped shots), the character clusters with sample faces, ids and WD14 name hints, and every kept shot with a thumbnail, time range, cast (framing and presence) and top WD14 tags. It is rebuilt from scratch each time, so no image outlives a shot the filter later drops.
 
 ## Layout and data
 

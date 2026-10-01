@@ -115,6 +115,18 @@ def frame_tags(conn: sqlite3.Connection, frame_id: int) -> list[Tag]:
     return [Tag(name, TagCategory(category), score) for name, category, score in rows]
 
 
+def shot_tags(conn: sqlite3.Connection, shot_id: int, limit: int = 5) -> list[tuple[str, float]]:
+    """The shot's strongest WD14 general tags, scored by their mean over its sampled frames."""
+    rows: list[tuple[str, float]] = conn.execute(
+        "SELECT t.tag, SUM(t.score) / (SELECT COUNT(*) FROM frames WHERE shot_id = ?)"
+        " FROM frame_tags AS t JOIN frames AS f ON f.id = t.frame_id"
+        " WHERE f.shot_id = ? AND t.category = 'general'"
+        " GROUP BY t.tag ORDER BY SUM(t.score) DESC, t.tag LIMIT ?",
+        (shot_id, shot_id, limit),
+    ).fetchall()
+    return rows
+
+
 def status_counts(conn: sqlite3.Connection, episode_id: int | None = None) -> dict[ShotStatus, int]:
     if episode_id is None:
         rows: list[tuple[str, int]] = conn.execute(

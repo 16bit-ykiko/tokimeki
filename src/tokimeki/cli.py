@@ -15,6 +15,7 @@ from tokimeki.library.cast import (
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import list_episodes, stage_done
 from tokimeki.library.shots import status_counts
+from tokimeki.report import build_report
 from tokimeki.stages import pipeline
 from tokimeki.stages.base import open_series, register_episodes
 from tokimeki.stages.cast import split_cluster
@@ -60,6 +61,15 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         pipeline.redo(ctx, episodes, redo)
     until: str = args.until
     pipeline.run(ctx, episodes, until)
+    no_report: bool = args.no_report
+    if not no_report:
+        print(f"report: {build_report(ctx.conn, ctx.paths)}")
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    print(f"report: {build_report(ctx.conn, ctx.paths)}")
     return 0
 
 
@@ -129,6 +139,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=pipeline.STAGE_NAMES[-1],
         help="stop after this stage",
     )
+    ingest.add_argument("--no-report", action="store_true", help="do not rebuild the report")
+
+    report = command("report", cmd_report, "rebuild the static HTML report of a series")
+    report.add_argument("series", help="the series directory holding the episodes")
 
     cast = sub.add_parser("cast", help="list, name, merge or split character clusters")
     cast_sub = cast.add_subparsers(required=True, metavar="action")
