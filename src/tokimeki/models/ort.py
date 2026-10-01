@@ -31,6 +31,7 @@ class _ModelMeta(Protocol):
 class _Session(Protocol):
     def get_providers(self) -> list[str]: ...
     def get_inputs(self) -> list[_NodeArg]: ...
+    def get_outputs(self) -> list[_NodeArg]: ...
     def get_modelmeta(self) -> _ModelMeta: ...
     def run(
         self, output_names: None, input_feed: dict[str, NDArray[np.float32]]
@@ -96,6 +97,10 @@ class OnnxModel:
     def input_names(self) -> list[str]:
         return [i.name for i in self.session.get_inputs()]
 
+    @property
+    def output_names(self) -> list[str]:
+        return [o.name for o in self.session.get_outputs()]
+
     def input_shape(self, index: int = 0) -> Shape:
         return list(self.session.get_inputs()[index].shape)
 
@@ -105,6 +110,9 @@ class OnnxModel:
 
     def run(self, feeds: Mapping[str, NDArray[np.float32]]) -> list[NDArray[np.float32]]:
         return self.session.run(None, dict(feeds))
+
+    def run_named(self, feeds: Mapping[str, NDArray[np.float32]]) -> dict[str, NDArray[np.float32]]:
+        return dict(zip(self.output_names, self.run(feeds), strict=True))
 
     def close(self) -> None:
         self._session = None

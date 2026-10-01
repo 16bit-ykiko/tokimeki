@@ -261,6 +261,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wayland-protocols-1.49-hd8ed1ab_0.conda
       - pypi: ./
+      - pypi: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/85/be/bb14f9015d357c9dff395a065bd658d1f7a199eb1f8d3abb9f4792416f11/transnetv2_pytorch-1.0.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl
@@ -4438,6 +4439,30 @@ packages:
 - pypi: ./
   name: tokimeki
   requires_python: '>=3.12,<3.13'
+- pypi: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl
+  name: silero-vad
+  version: 6.2.3
+  sha256: 7b7f5436cfcb02fae583a05b512ea96467fd449fe54cb49a5e4f06c51a1e43b8
+  requires_dist:
+  - packaging
+  - torch>=1.12.0
+  - numpy ; extra == 'all'
+  - onnxruntime>=1.16.1 ; extra == 'all'
+  - torchaudio>=0.12.0,<2.10 ; extra == 'all'
+  - torchcodec ; python_full_version >= '3.9' and extra == 'all'
+  - torchaudio>=0.12.0,<2.10 ; extra == 'audio'
+  - torchcodec ; python_full_version >= '3.9' and extra == 'audio'
+  - torchcodec ; python_full_version >= '3.9' and extra == 'codec'
+  - numpy ; extra == 'onnx-cpu'
+  - onnxruntime>=1.16.1 ; extra == 'onnx-cpu'
+  - numpy ; extra == 'onnx-gpu'
+  - onnxruntime-gpu>=1.16.1 ; extra == 'onnx-gpu'
+  - pytest ; extra == 'test'
+  - soundfile ; extra == 'test'
+  - torch<2.9 ; extra == 'test'
+  - torchaudio>=0.12.0,<2.10 ; extra == 'test'
+  - torchcodec ; python_full_version >= '3.9' and extra == 'test'
+  requires_python: '>=3.8'
 - pypi: https://files.pythonhosted.org/packages/85/be/bb14f9015d357c9dff395a065bd658d1f7a199eb1f8d3abb9f4792416f11/transnetv2_pytorch-1.0.5-py3-none-any.whl
   name: transnetv2-pytorch
   version: 1.0.5

@@ -38,6 +38,7 @@ tqdm = "*"
 
 [tool.pixi.feature.gpu.pypi-dependencies]
 transnetv2-pytorch = "==1.0.5"
+silero-vad = "==6.2.3"
 
 # Type checking needs PyTorch's annotations, not its CUDA libraries; CI runners have no GPU.
 [tool.pixi.feature.typing.dependencies]

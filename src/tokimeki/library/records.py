@@ -9,6 +9,17 @@ class ShotStatus(StrEnum):
     DROPPED = "dropped"
 
 
+class LineKind(StrEnum):
+    DIALOGUE = "dialogue"
+    LYRICS = "lyrics"
+    OTHER = "other"
+
+
+class PartKind(StrEnum):
+    OPENING = "op"
+    ENDING = "ed"
+
+
 class TagCategory(StrEnum):
     GENERAL = "general"
     CHARACTER = "character"
@@ -116,3 +127,26 @@ class ShotCast:
     presence: float
     face_height: float
     face_area: float
+
+
+@dataclass(frozen=True, slots=True)
+class Line:
+    """A subtitle line; times are seconds into the episode, already corrected for any offset."""
+
+    id: int
+    episode_id: int
+    start: float
+    end: float
+    kind: LineKind
+    style: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Part:
+    """An opening or ending sequence of an episode, in seconds."""
+
+    episode_id: int
+    kind: PartKind
+    start: float
+    end: float

@@ -8,9 +8,10 @@ import pytest
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.media.audio import AudioStream
 from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import cast, content_filter, frames, shots
+from tokimeki.stages import cast, content_filter, frames, lines, shots
 
 FRAMES = 72
 CUT = 24
@@ -105,6 +106,26 @@ class FakeEncoder:
         pass
 
 
+class FakeVad:
+    """Speech wherever the test subtitles have a line."""
+
+    def speech_probabilities(self, audio: NDArray[np.float32]) -> NDArray[np.float32]:
+        return np.full(len(audio) // 512 + 1, 0.2, dtype=np.float32)
+
+    def close(self) -> None:
+        pass
+
+
+def fake_audio(
+    path: Path, sample_rate: int, stream_index: int | None = None
+) -> NDArray[np.float32]:
+    return np.zeros(sample_rate * 40, dtype=np.float32)
+
+
+def fake_main_audio(path: Path) -> AudioStream:
+    return AudioStream(1, "flac", "jpn", "", True, False)
+
+
 def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shots, "TransNet", FakeTransNet)
     monkeypatch.setattr(shots, "decode_for_transnet", fake_decode)
@@ -112,6 +133,9 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(content_filter, "Wd14Tagger", FakeTagger)
     monkeypatch.setattr(cast, "FaceDetector", FakeDetector)
     monkeypatch.setattr(cast, "CcipEncoder", FakeEncoder)
+    monkeypatch.setattr(lines, "SileroVad", FakeVad)
+    monkeypatch.setattr(lines, "decode_audio", fake_audio)
+    monkeypatch.setattr(lines, "main_audio", fake_main_audio)
 
 
 def unsafe_everything(self: FakeTagger, batch: NDArray[np.float32]) -> list[Prediction]:

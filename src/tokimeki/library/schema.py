@@ -109,4 +109,34 @@ DROP TABLE clusters;
 ALTER TABLE clusters_v2 RENAME TO clusters;
 """
 
-MIGRATIONS: tuple[str, ...] = (V1, V2)
+V3 = """
+CREATE TABLE lines (
+    id INTEGER PRIMARY KEY,
+    episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    start REAL NOT NULL,
+    end REAL NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('dialogue', 'lyrics', 'other')),
+    style TEXT NOT NULL,
+    text TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX lines_episode ON lines(episode_id, start);
+
+CREATE TABLE episode_parts (
+    episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('op', 'ed')),
+    start REAL NOT NULL,
+    end REAL NOT NULL,
+    PRIMARY KEY (episode_id, kind)
+) STRICT;
+
+CREATE VIEW shot_lines AS
+SELECT s.id AS shot_id, l.id AS line_id
+FROM shots AS s
+JOIN episodes AS e ON e.id = s.episode_id
+JOIN lines AS l ON l.episode_id = s.episode_id
+WHERE l.start < CAST(s.end_frame AS REAL) * e.fps_den / e.fps_num
+  AND l.end > CAST(s.start_frame AS REAL) * e.fps_den / e.fps_num;
+"""
+
+MIGRATIONS: tuple[str, ...] = (V1, V2, V3)
