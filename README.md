@@ -12,7 +12,7 @@ First series: _To LOVE-Ru Darkness_, seasons 1–2 (24 episodes).
 
 1. **Shots.** NVDEC decodes every frame on the GPU, scaled down there to 48×27; TransNetV2 (PyTorch, CUDA) splits the episode into shots. Each shot is sampled every 0.5 s, at least 3 frames, into the frame cache at up to 720p. _TODO:_ OP/ED and recaps repeat every episode; perceptual hashes across episodes will drop them (within one episode they cannot be told apart from the story).
 2. **Content filter.** WD14 (SwinV2 v3, on CUDA) rates every sampled frame; one frame whose `questionable` + `explicit` scores reach `UNSAFE_THRESHOLD` (0.2, conservative; `stages/content_filter.py`) drops the whole shot. This runs before anything else sees the frames: a dropped shot keeps only its time range and the dropped flag, its frames are deleted from the cache, and it never reaches face detection, the report or a cloud model. There is no censor-and-keep path. Kept frames store their rating scores and WD14 general tags (for expressions later) and character tags.
-3. **Characters.** Anime face detection (deepghs YOLOv8) on kept frames, then CCIP embeddings of a square head crop (hair tells anime characters apart better than the face alone), both ONNX on CUDA. The models come from deepghs on the Hub and are run directly rather than through `dghs-imgutils`, which pins `numpy<2` and silently falls back to the CPU. Clusters are series-wide: average-linkage agglomerative clustering (CCIP difference, cut at `CLUSTER_THRESHOLD` = 0.15) runs over a new episode's faces together with the existing clusters, each standing in as a fixed group of exemplars, so faces join the clusters they match and the rest form new ones. You name each cluster once from a few thumbnails and the name carries over to later episodes. (DBSCAN, CCIP's suggested method, chained a whole episode into one cluster through ambiguous faces; average linkage does not.) WD14 character tags on single-face frames are shown as name hints. Per shot: who, face size (close-up or wide), share of the sampled frames they appear in (the `shot_cast` view).
+3. **Characters.** Anime face detection (deepghs YOLOv8) on kept frames, then CCIP embeddings of a square head crop (hair tells anime characters apart better than the face alone), both ONNX on CUDA (see [Models](#models)). Clusters are series-wide: average-linkage agglomerative clustering (CCIP difference, cut at `CLUSTER_THRESHOLD` = 0.15) runs over a new episode's faces together with the existing clusters, each standing in as a fixed group of exemplars, so faces join the clusters they match and the rest form new ones. You name each cluster once from a few thumbnails and the name carries over to later episodes. (DBSCAN, CCIP's suggested method, chained a whole episode into one cluster through ambiguous faces; average linkage does not.) WD14 character tags on single-face frames are shown as name hints. Per shot: who, face size (close-up or wide), share of the sampled frames they appear in (the `shot_cast` view).
 
    ```bash
    pixi run tokimeki cast list  ~/anime/to-love-ru-darkness            # ids, names, face counts, WD14 hints
@@ -93,6 +93,25 @@ src/tokimeki/
 - Measured on S1E01 (23:42, 1080p HEVC 10-bit): 19 min for shots, filter and cast, with the CPU fully loaded by other work and the GPU thermally throttled (SM clock ~220 MHz of 1635 during WD14 and CCIP). Roughly 3 min decoding, 8 min WD14, 6 min faces and CCIP; peak GPU memory 5 GB including the desktop.
 - Cloud: only per-scene understanding (cheap model) and arrangement (a strong model, a few rounds per MAD). Batch scoring goes through an API, not chat sessions.
 
+## Models
+
+Weights come from the Hugging Face Hub on first use (into the HF cache); the code that touches them lives in `src/tokimeki/models/`.
+
+| Stage | Model | Runs on |
+|---|---|---|
+| Shots | TransNetV2 (`transnetv2-pytorch`, bundled weights) | PyTorch, CUDA |
+| Content filter, tags | WD14 SwinV2 v3 (`SmilingWolf/wd-swinv2-tagger-v3`) | onnxruntime, CUDA |
+| Faces | `deepghs/anime_face_detection`, `face_detect_v1.4_s` (YOLOv8) | onnxruntime, CUDA |
+| Characters | `deepghs/ccip_onnx`, `ccip-caformer-24-randaug-pruned` | onnxruntime, CUDA |
+
+The deepghs and WD14 ONNX files are wrapped directly instead of going through `dghs-imgutils`, the library they were published with:
+
+- it pins `numpy<2` and pulls in opencv-contrib, bchlib and more, which clash with the CUDA builds of PyTorch and onnxruntime from conda-forge;
+- its sessions always list the CPU provider as a fallback, so a missing CUDA provider silently runs on the CPU; here a session that does not start on CUDA is an error;
+- it sets no thread or GPU-memory limits and caches sessions internally, so a model cannot be freed after its batch; here each model is loaded, run and closed under one lifecycle (`models/gpu.py`).
+
+The pre- and post-processing follow imgutils (WD14 padding and BGR order, YOLO decoding and NMS, CCIP normalisation). CCIP's pairwise metric model computes exactly (1 − cosine similarity) / 2, so it is done in numpy (`models/ccip.py`) and clustering needs no GPU. WD14 EVA02-Large rates better than SwinV2 but is 2.3× slower and peaks at 7.4 of 8 GB, so SwinV2 is the default (`models/wd14.py: MODEL_REPO`).
+
 ## Development
 
 [pixi](https://pixi.sh) manages the environment: Python 3.12, a CUDA build of ffmpeg (NVDEC, `scale_cuda`), PyTorch and onnxruntime, all from conda-forge.
@@ -104,7 +123,8 @@ pixi run check                # ruff lint + format check + basedpyright strict
 pixi run test                 # GPU tests are skipped where there is no GPU
 ```
 
-- The environment is solved for CUDA 12.9 (`platforms = [{ platform = "linux-64", cuda = "12.9" }]`). pixi finds the driver through `nvidia-smi`; on WSL that lives in `/usr/lib/wsl/lib`, which must be on `PATH` (or set `CONDA_OVERRIDE_CUDA=12.9`).
+- The environment is solved for CUDA 12.9 (`platforms = [{ platform = "linux-64", cuda = "12.9" }]`), not just `12`: conda-forge's CUDA build of ffmpeg requires `__cuda >= 12.8`, and with `cuda = "12"` the solver quietly picks the build without NVDEC or `scale_cuda`. `tokimeki gpu-check` fails if that ever happens.
+- pixi finds the driver through `nvidia-smi`; on WSL that lives in `/usr/lib/wsl/lib`, which must be on `PATH` (or set `CONDA_OVERRIDE_CUDA=12.9`), otherwise pixi refuses to run anything.
 - Nothing heavy falls back to the CPU: without NVDEC or CUDA the pipeline stops with an error. CPU thread pools are kept small (`models.CPU_THREADS`).
 - One model is on the GPU at a time and may use at most `GPU_MEMORY_LIMIT` (4 GiB, `models/gpu.py`). Past the card's memory the Windows driver pages to system RAM and everything crawls; the cap turns that into an error. Setting *CUDA – Sysmem Fallback Policy* to *Prefer No Sysmem Fallback* in the NVIDIA Control Panel does the same driver-wide.
 - CI type-checks in the small `lint` environment (CPU PyTorch: same annotations, no CUDA libraries).
