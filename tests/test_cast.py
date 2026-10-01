@@ -153,3 +153,88 @@ def test_recluster_keeps_named_clusters(tmp_path: Path, monkeypatch: pytest.Monk
     cast.rename(ctx, renewed.id, "Momo")
     assert cast.recluster(ctx, episodes) == 0
     assert cast_db.list_clusters(ctx.conn)[0].name == "Momo"
+
+
+def _named(conn: sqlite3.Connection, episode_id: int, name: str) -> int:
+    cluster = cast_db.create_cluster(conn, name)
+    cast_db.assign_faces(
+        conn, [f.face.id for f in cast_db.episode_faces(conn, episode_id)], cluster
+    )
+    return cluster
+
+
+def _shot_of(conn: sqlite3.Connection, episode_id: int) -> int:
+    return cast_db.episode_faces(conn, episode_id)[0].shot_id
+
+
+def _counts(conn: sqlite3.Connection) -> dict[str, int]:
+    return {c.label: c.face_count for c in cast_db.list_clusters(conn)}
+
+
+def test_fixes_chain_and_follow_merges() -> None:
+    conn = open_library(":memory:")
+    first = _add_episode_faces(conn, "ep01.mkv", [0.0, 0.1])
+    second = _add_episode_faces(conn, "ep02.mkv", [0.05, 0.08, 0.09])
+    momo = _named(conn, first, "Momo")
+    cast_db.assign_faces(conn, [f.face.id for f in cast_db.episode_faces(conn, second)], momo)
+    nana, mea = cast_db.create_cluster(conn, "Nana"), cast_db.create_cluster(conn, "Mea")
+    shot = _shot_of(conn, second)
+
+    cast_db.fix_shot_cast(conn, shot, momo, mea)
+    cast_db.fix_shot_cast(conn, shot, mea, nana)
+    fix = cast_db.CastFix
+    assert cast_db.list_cast_fixes(conn) == [fix(shot, momo, nana), fix(shot, mea, nana)]
+    assert _counts(conn) == {"Nana": 3, "Momo": 2, "Mea": 0}
+
+    cast_db.merge_clusters(conn, nana, mea)
+    assert cast_db.list_cast_fixes(conn) == [fix(shot, momo, mea)]
+    cast_db.assign_faces(conn, [f.face.id for f in cast_db.episode_faces(conn, second)], momo)
+    cast_db.apply_cast_fixes(conn)
+    assert _counts(conn) == {"Mea": 3, "Momo": 2}
+
+    cast_db.merge_clusters(conn, mea, momo)
+    assert cast_db.list_cast_fixes(conn) == []
+
+
+def test_moved_shots_stay_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("ep01.mkv", "ep02.mkv"):
+        make_clip(tmp_path / name, ["color=c=red", "color=c=blue"])
+    fakes.install(monkeypatch)
+    ctx = open_series(tmp_path)
+    episodes = register_episodes(ctx)
+    pipeline.run(ctx, episodes)
+    (cluster,) = cast_db.list_clusters(ctx.conn)
+    cast.rename(ctx, cluster.id, "Momo")
+    nana = cast_db.create_cluster(ctx.conn, "Nana")
+    (shot,) = cast_db.named_cast_by_shot(ctx.conn, episodes[1].id)
+
+    assert cast.move(ctx, [shot], None, "Nana") == [f"shot {shot}: Momo -> Nana"]
+    assert _counts(ctx.conn) == {"Momo": 4, "Nana": 4}
+    cast.recluster(ctx, episodes)
+    cast.split(ctx, nana)
+    pipeline.redo(ctx, episodes[1:], "cast")
+    pipeline.run(ctx, episodes)
+    assert _counts(ctx.conn) == {"Momo": 4, "Nana": 4}
+    assert [n for n, _ in cast_db.named_cast_by_shot(ctx.conn, episodes[1].id)[shot]] == ["Nana"]
+    assert [(src, dst) for _, src, dst in cast.fixes(ctx)] == [("Momo", "Nana")]
+
+    cast.move(ctx, [shot], "Nana", None)
+    cast.recluster(ctx, episodes)
+    assert _counts(ctx.conn) == {"Momo": 4, "Nana": 0}
+    with pytest.raises(ValueError, match="nobody named"):
+        cast.move(ctx, [shot], None, "Momo")
+
+
+def test_doubtful_shots_look_like_someone_else(tmp_path: Path) -> None:
+    ctx = open_series(tmp_path)
+    momo = [_add_episode_faces(ctx.conn, f"ep0{i}.mkv", [0.0, 0.02, 0.04]) for i in (1, 2)]
+    odd = _add_episode_faces(ctx.conn, "ep03.mkv", [0.5, 0.52])
+    cluster = _named(ctx.conn, momo[0], "Momo")
+    for episode in (momo[1], odd):
+        faces = cast_db.episode_faces(ctx.conn, episode)
+        cast_db.assign_faces(ctx.conn, [f.face.id for f in faces], cluster)
+    _named(ctx.conn, _add_episode_faces(ctx.conn, "ep04.mkv", [0.6, 0.62]), "Nana")
+
+    first, *_ = cast.doubtful(ctx, "Momo", 5)
+    assert (first.shot_id, first.nearest) == (_shot_of(ctx.conn, odd), "Nana")
+    assert first.margin < 0 and first.keyframe.endswith(".jpg")

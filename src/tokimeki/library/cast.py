@@ -146,6 +146,19 @@ def get_cluster(conn: sqlite3.Connection, cluster_id: int) -> Cluster:
     raise KeyError(f"no cluster {cluster_id}")
 
 
+def find_cluster(conn: sqlite3.Connection, ref: str) -> Cluster:
+    """A cluster by name, or by id (`3` or `#3`)."""
+    clusters = list_clusters(conn)
+    for cluster in clusters:
+        if cluster.name == ref:
+            return cluster
+    number = ref.removeprefix("#")
+    for cluster in clusters:
+        if number.isdigit() and cluster.id == int(number):
+            return cluster
+    raise KeyError(f"no cluster {ref!r}")
+
+
 def name_cluster(conn: sqlite3.Connection, cluster_id: int, name: str | None) -> None:
     get_cluster(conn, cluster_id)
     conn.execute("UPDATE clusters SET name = ? WHERE id = ?", (name, cluster_id))
@@ -157,9 +170,69 @@ def merge_clusters(conn: sqlite3.Connection, source_id: int, target_id: int) -> 
         raise ValueError("cannot merge a cluster into itself")
     source, target = get_cluster(conn, source_id), get_cluster(conn, target_id)
     conn.execute("UPDATE faces SET cluster_id = ? WHERE cluster_id = ?", (target_id, source_id))
+    conn.execute(
+        "DELETE FROM cast_fixes WHERE from_cluster IN (?, ?) AND to_cluster IN (?, ?)",
+        (source_id, target_id, source_id, target_id),
+    )
+    conn.execute(
+        "UPDATE OR REPLACE cast_fixes SET from_cluster = ? WHERE from_cluster = ?",
+        (target_id, source_id),
+    )
+    conn.execute(
+        "UPDATE cast_fixes SET to_cluster = ? WHERE to_cluster = ?", (target_id, source_id)
+    )
     conn.execute("DELETE FROM clusters WHERE id = ?", (source_id,))
     if target.name is None and source.name is not None:
         conn.execute("UPDATE clusters SET name = ? WHERE id = ?", (source.name, target_id))
+    apply_cast_fixes(conn)
+
+
+@dataclass(frozen=True, slots=True)
+class CastFix:
+    shot_id: int
+    from_cluster: int
+    to_cluster: int | None
+
+
+def fix_shot_cast(
+    conn: sqlite3.Connection, shot_id: int, from_cluster: int, to_cluster: int | None
+) -> None:
+    """Record that faces of `from_cluster` in the shot belong to `to_cluster` (None: nobody)
+    and move them. A fix that moved faces into `from_cluster` is redirected instead."""
+    conn.execute(
+        "DELETE FROM cast_fixes WHERE shot_id = ? AND from_cluster IS ? AND to_cluster = ?",
+        (shot_id, to_cluster, from_cluster),
+    )
+    conn.execute(
+        "UPDATE cast_fixes SET to_cluster = ? WHERE shot_id = ? AND to_cluster = ?",
+        (to_cluster, shot_id, from_cluster),
+    )
+    if to_cluster != from_cluster:
+        conn.execute(
+            "INSERT INTO cast_fixes (shot_id, from_cluster, to_cluster) VALUES (?, ?, ?)"
+            " ON CONFLICT (shot_id, from_cluster) DO UPDATE SET to_cluster = excluded.to_cluster",
+            (shot_id, from_cluster, to_cluster),
+        )
+    apply_cast_fixes(conn)
+
+
+def apply_cast_fixes(conn: sqlite3.Connection) -> None:
+    """Move every face a recorded fix covers; run after anything that assigns clusters."""
+    fixed = (
+        "FROM cast_fixes AS x JOIN frames AS f ON f.shot_id = x.shot_id"
+        " WHERE f.id = faces.frame_id AND x.from_cluster = faces.cluster_id"
+    )
+    conn.execute(
+        f"UPDATE faces SET cluster_id = (SELECT x.to_cluster {fixed})"
+        f" WHERE EXISTS (SELECT 1 {fixed})"
+    )
+
+
+def list_cast_fixes(conn: sqlite3.Connection) -> list[CastFix]:
+    rows: list[tuple[int, int, int | None]] = conn.execute(
+        "SELECT shot_id, from_cluster, to_cluster FROM cast_fixes ORDER BY shot_id, from_cluster"
+    ).fetchall()
+    return [CastFix(*row) for row in rows]
 
 
 def unassign_unnamed(conn: sqlite3.Connection) -> None:

@@ -16,8 +16,10 @@ from numpy.typing import NDArray
 from PIL import Image
 
 from tokimeki.library.cast import (
+    CastFix,
     NewFace,
     add_faces,
+    apply_cast_fixes,
     assign_faces,
     clear_episode_faces,
     cluster_character_tags,
@@ -26,7 +28,10 @@ from tokimeki.library.cast import (
     create_cluster,
     episode_faces,
     face_embeddings,
+    find_cluster,
+    fix_shot_cast,
     get_cluster,
+    list_cast_fixes,
     list_clusters,
     merge_clusters,
     name_cluster,
@@ -35,7 +40,7 @@ from tokimeki.library.cast import (
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.records import Box, Cluster, Episode, Frame, ShotStatus
-from tokimeki.library.shots import list_episode_frames, list_shots
+from tokimeki.library.shots import get_shot, list_episode_frames, list_shots
 from tokimeki.media.images import load_image, square_around
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
@@ -181,7 +186,9 @@ def assign_clusters(conn: sqlite3.Connection, episode_id: int) -> int:
         for cluster_id, members in clustered_face_ids(conn).items()
     }
     embeddings = face_embeddings(conn, face_ids)
-    return len(_agglomerate(conn, face_ids, embeddings, CLUSTER_THRESHOLD, known))
+    created = _agglomerate(conn, face_ids, embeddings, CLUSTER_THRESHOLD, known)
+    apply_cast_fixes(conn)
+    return len(created)
 
 
 def _agglomerate(
@@ -233,6 +240,7 @@ def split_cluster(conn: sqlite3.Connection, cluster_id: int) -> list[int]:
     created = _agglomerate(conn, face_ids, embeddings, CLUSTER_THRESHOLD * SPLIT_FACTOR, {})
     if created:
         merge_clusters(conn, created[0], cluster_id)
+    apply_cast_fixes(conn)
     return created[1:]
 
 
@@ -267,3 +275,111 @@ def recluster(ctx: Context, episodes: Sequence[Episode]) -> int:
 def split(ctx: Context, cluster_id: int) -> list[int]:
     with transaction(ctx.conn):
         return split_cluster(ctx.conn, cluster_id)
+
+
+def _named(conn: sqlite3.Connection, ref: str) -> Cluster:
+    cluster = find_cluster(conn, ref)
+    if cluster.name is None:
+        raise ValueError(f"cluster #{cluster.id} has no name; name it first (fixes stay on names)")
+    return cluster
+
+
+def move(ctx: Context, shots: Sequence[int], source: str | None, target: str | None) -> list[str]:
+    """In each shot, move the faces of `source` (by default the one named character there) to
+    `target` (None: to nobody), and keep that as a fix that every later clustering obeys."""
+    conn = ctx.conn
+    to = _named(conn, target) if target is not None else None
+    done: list[str] = []
+    with transaction(conn):
+        for shot_id in shots:
+            try:
+                get_shot(conn, shot_id)
+            except KeyError:
+                raise ValueError(f"no shot {shot_id}") from None
+            here = {
+                c.id: c
+                for c in (get_cluster(conn, k) for k in _clusters_in(conn, shot_id))
+                if c.name is not None
+            }
+            if source is not None:
+                origin = _named(conn, source)
+            else:
+                options = [c for c in here.values() if to is None or c.id != to.id]
+                if len(options) != 1:
+                    names = ", ".join(c.label for c in options) or "nobody named"
+                    raise ValueError(f"shot {shot_id} has {names}; say which with --from")
+                (origin,) = options
+            if origin.id not in here:
+                raise ValueError(f"{origin.label} is not in shot {shot_id}")
+            fix_shot_cast(conn, shot_id, origin.id, to.id if to else None)
+            done.append(f"shot {shot_id}: {origin.label} -> {to.label if to else 'nobody'}")
+    return done
+
+
+def _clusters_in(conn: sqlite3.Connection, shot_id: int) -> list[int]:
+    rows: list[tuple[int]] = conn.execute(
+        "SELECT cluster_id FROM shot_cast WHERE shot_id = ?", (shot_id,)
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def fixes(ctx: Context) -> list[tuple[CastFix, str, str]]:
+    """Every recorded fix, with the names it moves faces from and to."""
+
+    def label(cluster_id: int | None) -> str:
+        return get_cluster(ctx.conn, cluster_id).label if cluster_id is not None else "nobody"
+
+    return [(f, label(f.from_cluster), label(f.to_cluster)) for f in list_cast_fixes(ctx.conn)]
+
+
+@dataclass(frozen=True, slots=True)
+class Doubt:
+    shot_id: int
+    faces: int
+    own: float
+    """Mean CCIP difference of the shot's faces to the cluster's faces in other shots."""
+    nearest: str
+    other: float
+    """Mean CCIP difference to the nearest other named cluster."""
+    keyframe: str
+
+    @property
+    def margin(self) -> float:
+        return self.other - self.own
+
+
+def doubtful(ctx: Context, ref: str, limit: int) -> list[Doubt]:
+    """The cluster's shots whose faces sit closest to another named cluster, most doubtful first.
+
+    A review aid: look at the keyframes and `move` the shots that are someone else.
+    """
+    conn = ctx.conn
+    cluster = find_cluster(conn, ref)
+    faces = cluster_faces(conn, cluster.id)
+    if not faces:
+        return []
+    embeddings = face_embeddings(conn, [f.face.id for f in faces])
+    shot_of = np.array([f.shot_id for f in faces])
+    within = ccip_differences(embeddings, embeddings)
+    others = {
+        c.label: ccip_differences(embeddings, face_embeddings(conn, members)).mean(axis=1)
+        for c, members in (
+            (get_cluster(conn, k), v)
+            for k, v in clustered_face_ids(conn).items()
+            if k != cluster.id
+        )
+        if c.name is not None
+    }
+    doubts: list[Doubt] = []
+    for shot_id in np.unique(shot_of):
+        mine = shot_of == shot_id
+        if mine.all() or not others:
+            continue
+        own = float(within[np.ix_(mine, ~mine)].mean())
+        other, nearest = min((float(d[mine].mean()), name) for name, d in others.items())
+        best = max(
+            (f for f, m in zip(faces, mine, strict=True) if m), key=lambda f: f.face.box.height
+        )
+        frame = ctx.paths.frame_path(best.episode_id, best.frame_index)
+        doubts.append(Doubt(int(shot_id), int(mine.sum()), own, nearest, other, str(frame)))
+    return sorted(doubts, key=lambda d: d.margin)[:limit]

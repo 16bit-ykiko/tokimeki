@@ -161,4 +161,16 @@ BEGIN
 END;
 """
 
-MIGRATIONS: tuple[str, ...] = (V1, V2, V3, V4)
+# A user's correction of who is in a shot: faces of `from_cluster` there belong to `to_cluster`
+# (NULL: to nobody). Kept by shot, so it is applied again whenever faces are clustered anew.
+V5 = """
+CREATE TABLE cast_fixes (
+    shot_id INTEGER NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+    from_cluster INTEGER NOT NULL REFERENCES clusters(id) ON DELETE CASCADE,
+    to_cluster INTEGER REFERENCES clusters(id) ON DELETE CASCADE,
+    PRIMARY KEY (shot_id, from_cluster),
+    CHECK (to_cluster IS NOT from_cluster)
+) STRICT;
+"""
+
+MIGRATIONS: tuple[str, ...] = (V1, V2, V3, V4, V5)

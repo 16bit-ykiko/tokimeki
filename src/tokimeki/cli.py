@@ -235,6 +235,41 @@ def cmd_cast_split(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cast_move(args: argparse.Namespace) -> int:
+    shots: list[int] = args.shot
+    source: str | None = args.source
+    target: str | None = args.to
+    try:
+        done = cast.move(open_series(_series(args)), shots, source, target)
+    except (KeyError, ValueError) as error:
+        print(f"error: {error.args[0]}", file=sys.stderr)
+        return 1
+    print("\n".join(done))
+    return 0
+
+
+def cmd_cast_fixes(args: argparse.Namespace) -> int:
+    for fix, source, target in cast.fixes(open_series(_series(args))):
+        print(f"shot {fix.shot_id}: {source} -> {target}")
+    return 0
+
+
+def cmd_cast_doubtful(args: argparse.Namespace) -> int:
+    ref: str = args.cluster
+    limit: int = args.limit
+    try:
+        doubts = cast.doubtful(open_series(_series(args)), ref, limit)
+    except KeyError as error:
+        print(f"error: {error.args[0]}", file=sys.stderr)
+        return 1
+    for d in doubts:
+        print(
+            f"shot {d.shot_id:5}  {d.faces:3} faces  own {d.own:.3f}"
+            f"  {d.nearest} {d.other:.3f} ({d.margin:+.3f})  {d.keyframe}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tokimeki", description=__doc__)
     sub = parser.add_subparsers(required=True, metavar="command")
@@ -338,7 +373,9 @@ def build_parser() -> argparse.ArgumentParser:
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")
 
-    cast_parser = sub.add_parser("cast", help="list, name, merge or split character clusters")
+    cast_parser = sub.add_parser(
+        "cast", help="list, name, merge, split or correct character clusters"
+    )
     cast_sub = cast_parser.add_subparsers(required=True, metavar="action")
 
     def cast_command(name: str, handler: Handler, help_: str) -> argparse.ArgumentParser:
@@ -359,6 +396,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     split = cast_command("split", cmd_cast_split, "re-cluster one cluster more tightly")
     split.add_argument("cluster", type=int)
+    move = cast_command(
+        "move",
+        cmd_cast_move,
+        "say who is really in a shot: its faces of one character go to another (kept through"
+        " recluster, split and a cast redo)",
+    )
+    move.add_argument("--shot", type=int, action="append", required=True, help="repeatable")
+    move.add_argument(
+        "--from",
+        dest="source",
+        help="the cluster (name or id) the faces are in now; needed only"
+        " when the shot has several named characters",
+    )
+    target = move.add_mutually_exclusive_group(required=True)
+    target.add_argument("--to", help="the named cluster they belong to")
+    target.add_argument(
+        "--nobody", dest="to", action="store_const", const=None, help="take them out of the cast"
+    )
+    cast_command("fixes", cmd_cast_fixes, "list the shots moved with `cast move`")
+    doubt = cast_command(
+        "doubtful", cmd_cast_doubtful, "shots of a cluster that look most like another character"
+    )
+    doubt.add_argument("cluster", help="name or id")
+    doubt.add_argument("--limit", type=int, default=15)
     return parser
 
 
