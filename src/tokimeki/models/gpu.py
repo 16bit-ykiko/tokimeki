@@ -1,16 +1,24 @@
 """GPU lifecycle: one model on the GPU at a time, loaded for a batch and freed after it."""
 
 import gc
+import importlib
 import shutil
 import subprocess
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import torch
 
 WSL_DRIVER_DIR = Path("/usr/lib/wsl/lib")
+
+GPU_MEMORY_LIMIT = 4 * 2**30
+"""Most GPU memory one model may allocate.
+
+Past the card's memory, the Windows driver under WSL quietly pages to system RAM and runs
+orders of magnitude slower; with a cap, an oversized batch fails with an error instead.
+"""
 
 
 class GpuUnavailableError(RuntimeError):
@@ -22,6 +30,10 @@ class GpuModel(Protocol):
 
 
 _loaded: str | None = None
+_set_memory_fraction = cast(
+    Callable[[float], None],
+    importlib.import_module("torch.cuda.memory").set_per_process_memory_fraction,
+)
 
 
 @contextmanager
@@ -59,7 +71,10 @@ def torch_cuda() -> torch.device:
             "PyTorch sees no CUDA device; this pipeline does not run on the CPU."
             " Check `nvidia-smi` and that the pixi environment has a CUDA build of PyTorch."
         )
-    return torch.device("cuda")
+    device = torch.device("cuda")
+    _, total = torch.cuda.mem_get_info(device)
+    _set_memory_fraction(min(1.0, GPU_MEMORY_LIMIT / total))
+    return device
 
 
 def nvidia_smi() -> Path:

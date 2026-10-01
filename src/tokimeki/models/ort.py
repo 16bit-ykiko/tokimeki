@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from tokimeki.models import CPU_THREADS
-from tokimeki.models.gpu import GpuUnavailableError
+from tokimeki.models.gpu import GPU_MEMORY_LIMIT, GpuUnavailableError
 
 CUDA_PROVIDER = "CUDAExecutionProvider"
 
@@ -72,7 +72,11 @@ class OnnxModel:
         options.inter_op_num_threads = 1
         options.log_severity_level = 3
         options.graph_optimization_level = _OPTIMIZE_ALL
-        provider_options = {"cudnn_conv_algo_search": "HEURISTIC"}
+        provider_options = {
+            "cudnn_conv_algo_search": "HEURISTIC",
+            "gpu_mem_limit": str(GPU_MEMORY_LIMIT),
+            "arena_extend_strategy": "kSameAsRequested",
+        }
         session = _new_session(
             str(path), sess_options=options, providers=[(CUDA_PROVIDER, provider_options)]
         )

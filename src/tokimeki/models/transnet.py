@@ -15,7 +15,7 @@ THRESHOLD = 0.5
 WINDOW = 100
 CONTEXT = 25
 STEP = WINDOW - 2 * CONTEXT
-WINDOWS_PER_BATCH = 16
+WINDOWS_PER_BATCH = 4
 
 
 def _load_network(device: torch.device) -> torch.nn.Module:
