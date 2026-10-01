@@ -1,7 +1,9 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from tokimeki.library.records import Episode
+from tokimeki.library.episodes import list_episodes, stage_done
+from tokimeki.library.records import Episode, ShotStatus
+from tokimeki.library.shots import status_counts
 from tokimeki.stages import cast, content_filter, shots
 from tokimeki.stages.base import Context
 
@@ -32,6 +34,24 @@ def redo(ctx: Context, episodes: Sequence[Episode], stage: str) -> None:
     for later in reversed(STAGES[_position(stage) :]):
         for episode in episodes:
             later.reset(ctx, episode)
+
+
+@dataclass(frozen=True)
+class EpisodeStatus:
+    episode: Episode
+    finished: list[str]
+    shots: dict[ShotStatus, int]
+
+
+def status(ctx: Context) -> list[EpisodeStatus]:
+    return [
+        EpisodeStatus(
+            episode,
+            [name for name in STAGE_NAMES if stage_done(ctx.conn, episode.id, name)],
+            status_counts(ctx.conn, episode.id),
+        )
+        for episode in list_episodes(ctx.conn)
+    ]
 
 
 def run(ctx: Context, episodes: Sequence[Episode], until: str = STAGE_NAMES[-1]) -> None:

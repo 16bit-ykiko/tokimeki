@@ -20,17 +20,20 @@ from tokimeki.library.cast import (
     add_faces,
     assign_faces,
     clear_episode_faces,
+    cluster_character_tags,
     cluster_faces,
     clustered_face_ids,
     create_cluster,
     episode_faces,
     face_embeddings,
     get_cluster,
+    list_clusters,
     merge_clusters,
+    name_cluster,
 )
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
-from tokimeki.library.records import Box, Episode, Frame, ShotStatus
+from tokimeki.library.records import Box, Cluster, Episode, Frame, ShotStatus
 from tokimeki.library.shots import list_episode_frames, list_shots
 from tokimeki.media.images import load_image, square_around
 from tokimeki.models.ccip import (
@@ -228,3 +231,24 @@ def split_cluster(conn: sqlite3.Connection, cluster_id: int) -> list[int]:
     if created:
         merge_clusters(conn, created[0], cluster_id)
     return created[1:]
+
+
+def clusters_with_hints(ctx: Context) -> list[tuple[Cluster, list[tuple[str, float]]]]:
+    """Every cluster with its WD14 character-tag name hints."""
+    return [(c, cluster_character_tags(ctx.conn, c.id)) for c in list_clusters(ctx.conn)]
+
+
+def rename(ctx: Context, cluster_id: int, name: str | None) -> None:
+    with transaction(ctx.conn):
+        name_cluster(ctx.conn, cluster_id, name)
+
+
+def merge(ctx: Context, sources: Sequence[int], target: int) -> None:
+    with transaction(ctx.conn):
+        for source in sources:
+            merge_clusters(ctx.conn, source, target)
+
+
+def split(ctx: Context, cluster_id: int) -> list[int]:
+    with transaction(ctx.conn):
+        return split_cluster(ctx.conn, cluster_id)
