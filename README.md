@@ -31,7 +31,7 @@ First series: _To LOVE-Ru Darkness_ and _Darkness 2nd_ (12 + 14 = 26 episodes).
 
 ## Stage 2: MAD
 
-1. **Song.** Beats, bars and sections (verse, chorus, bridge) with `allin1` or beat_this; energy curve and accents; lyrics timeline from an LRC file or Whisper. Output: a timeline of slots (e.g. a cut per bar in verses, every two beats in the chorus).
+1. **Song.** A song is an audio file or a track of a CD image (`.cue`). Beat This! (on CUDA) gives beats and downbeats; bars follow the downbeat phase most detections agree on (4/4). `allin1` is not used: it needs natten and madmom, which do not build for this PyTorch. Sections instead come from novelty in the bar self-similarity matrix and from the vocal line, which a CD's "(Instrumental)" track gives for free (whatever the mix has on top of it is the voice); the loudest repeated sung section is the chorus. MORE&MORE: 176.5 bpm, intro 0.9–16 s, verse to 58.2 s, first chorus to 81.1 s. The default excerpt runs from the top through the first chorus, kept within 45–90 s. Slots: a cut a bar in verses and every two beats in the chorus, slowed section by section (verse first, chorus last, never past 4 s a slot) until there are no more slots than usable shots. Analyses are cached in `.tokimeki/songs/<song>/analysis.json` (`tokimeki song`). TODO: lyrics timeline, energy accents within a bar.
 2. **Arrangement (model).** From the slots, the lyrics and the library's text, a model writes the edit plan: which scene goes in which slot and why. Everyday moments early, the cutest in the chorus, the emotional ones in the bridge, a signature smile to close; no repeats, close-ups alternating with wide shots, picture answering the lyrics.
 3. **Cut placement (algorithm).** Within each chosen shot, pick the stretch whose expression peaks (per-frame tag scores), and land motion onsets (head turns, blinks, jumps; frame difference or optical flow) on the beat. Speed 0.9–1.1× to fit; anime animated on twos and threes hides it.
 4. **Sound.** The song is the main track; lines worth keeping are separated with Demucs and placed in the song's gaps, with the music ducked.
@@ -67,6 +67,7 @@ The report is one static page in the data directory: totals (shots, kept, droppe
     .tokimeki/
       library.db                      # the series library (SQLite)
       cache/frames/<episode id>/      # sampled frames as JPEG; regenerable, safe to delete
+      songs/<song>/analysis.json      # beats, bars, sections of a song
       report/index.html               # the static review page and its images
   ```
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.

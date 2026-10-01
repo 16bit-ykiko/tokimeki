@@ -35,10 +35,19 @@ onnxruntime = { version = "*", build = "*cuda*" }
 huggingface_hub = "*"
 pandas = "*"
 tqdm = "*"
+einops = "*"
+rotary-embedding-torch = "*"
 
 [tool.pixi.feature.gpu.pypi-dependencies]
 transnetv2-pytorch = "==1.0.5"
 silero-vad = "==6.2.3"
+beat-this = "==1.1.0"
+
+# beat-this wants torchaudio (and soxr) only for audio loading and its mel front end, which
+# models/beats.py replaces; conda-forge has no torchaudio for this PyTorch.
+[tool.pixi.pypi-options.dependency-overrides]
+torchaudio = { version = ">=0", env-markers = "sys_platform == 'never'" }
+soxr = { version = ">=0", env-markers = "sys_platform == 'never'" }
 
 # Type checking needs PyTorch's annotations, not its CUDA libraries; CI runners have no GPU.
 [tool.pixi.feature.typing.dependencies]

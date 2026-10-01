@@ -217,6 +217,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.12.14-py312hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-cudart_linux-64-12.9.79-h3f2d84a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/cuda-version-12.9-h4f385c5_3.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/einops-0.8.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-4.0.7-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/font-ttf-dejavu-sans-mono-2.37-hab24e00_0.tar.bz2
@@ -250,6 +251,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-flatbuffers-25.12.19-pyh9d96877_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.12.14-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.12-9_cp312.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/rotary-embedding-torch-0.9.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/setuptools-81.0.0-pyh332efcf_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/sniffio-1.3.1-pyhd8ed1ab_2.conda
@@ -263,6 +265,7 @@ environments:
       - pypi: ./
       - pypi: https://files.pythonhosted.org/packages/84/ef/9099037ed6f180ea33220178df4107112c0ce2bf5fb4d6f6ab19db2844ed/silero_vad-6.2.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/85/be/bb14f9015d357c9dff395a065bd658d1f7a199eb1f8d3abb9f4792416f11/transnetv2_pytorch-1.0.5-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/ce/0e/e23cbbe6e3efcd54e84dec22b6d88954655036a993cc3843ab741bc24de4/beat_this-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/da/71/ae30dadffc90b9006d77af76b393cb9dfbfc9629f339fc1574a1c52e6806/future-1.0.0-py3-none-any.whl
   lint:
@@ -3873,6 +3876,18 @@ packages:
   run_exports: {}
   size: 21578
   timestamp: 1746134436166
+- conda: https://conda.anaconda.org/conda-forge/noarch/einops-0.8.2-pyhd8ed1ab_0.conda
+  sha256: 3f2f951176fe646371b7bf09d42521b5a30a7a5d5c7ba49eb79efb97fe870cfa
+  md5: 59f72c47e4c63aacae4b322ac00bda7c
+  depends:
+  - python >=3.10
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/einops?source=hash-mapping
+  run_exports: {}
+  size: 58171
+  timestamp: 1769426991573
 - conda: https://conda.anaconda.org/conda-forge/noarch/exceptiongroup-1.3.1-pyhd8ed1ab_0.conda
   sha256: ee6cf346d017d954255bbcbdb424cddea4d14e4ed7e9813e429db1d795d01144
   md5: 8e662bd460bda79b1ea39194e3c4c9ab
@@ -4313,6 +4328,21 @@ packages:
   run_exports: {}
   size: 6751
   timestamp: 1788302823694
+- conda: https://conda.anaconda.org/conda-forge/noarch/rotary-embedding-torch-0.9.1-pyhcf101f3_0.conda
+  sha256: a28455a27cbad99ea47ed44a90c0bb14c881347f0fb5515951fe89aa01b81a29
+  md5: 579488634faac0525b2dff076655af7e
+  depends:
+  - python >=3.10
+  - einops >=0.8
+  - pytorch >=2.4
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/rotary-embedding-torch?source=hash-mapping
+  run_exports: {}
+  size: 20902
+  timestamp: 1782008875344
 - conda: https://conda.anaconda.org/conda-forge/noarch/setuptools-81.0.0-pyh332efcf_0.conda
   sha256: 6ecf738d5590bf228f09c4ecd1ea91d811f8e0bd9acdef341bc4d6c36beb13a3
   md5: d629a398d7bf872f9ed7b27ab959de15
@@ -4480,6 +4510,18 @@ packages:
   - flake8 ; extra == 'dev'
   - mypy ; extra == 'dev'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/ce/0e/e23cbbe6e3efcd54e84dec22b6d88954655036a993cc3843ab741bc24de4/beat_this-1.1.0-py3-none-any.whl
+  name: beat-this
+  version: 1.1.0
+  sha256: 3f2b2d1e027c6dac380bf80c71555e3c28a4036a7f1af20129a945915a72a645
+  requires_dist:
+  - numpy>=1.20
+  - torch>=2
+  - torchaudio
+  - einops
+  - rotary-embedding-torch
+  - soxr
+  requires_python: '>=3'
 - pypi: https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl
   name: ffmpeg-python
   version: 0.2.0

@@ -7,6 +7,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki.report import build_report
+from tokimeki.song.analysis import analyse_song
+from tokimeki.song.slots import first_chorus, make_slots
 from tokimeki.stages import cast, pipeline, scenes
 from tokimeki.stages.base import open_series, register_episodes
 from tokimeki.stages.selfcheck import run_checks
@@ -80,6 +82,24 @@ def cmd_scenes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_song(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    song_path: str = args.song
+    track: int | None = args.track
+    budget: int = args.shots
+    analysis = analyse_song(ctx.paths, Path(song_path).expanduser(), track)
+    print(f"{analysis.song.title}: {analysis.bpm:.1f} bpm, {len(analysis.bars)} bars")
+    for s in analysis.sections:
+        print(f"  {s.label:10} bars {s.first_bar:3}-{s.end_bar:3}  {s.start:6.1f}-{s.end:6.1f}s")
+    excerpt = first_chorus(analysis)
+    slots = make_slots(analysis, excerpt, budget)
+    print(
+        f"excerpt {excerpt.start:.1f}-{excerpt.end:.1f}s ({excerpt.duration:.1f}s):"
+        f" {len(slots)} slots for up to {budget} shots"
+    )
+    return 0
+
+
 def cmd_cast_list(args: argparse.Namespace) -> int:
     ctx = open_series(_series(args))
     for cluster, hints in cast.clusters_with_hints(ctx):
@@ -149,6 +169,12 @@ def build_parser() -> argparse.ArgumentParser:
     scene_list = command("scenes", cmd_scenes, "list scenes with cast, expressions and lines")
     scene_list.add_argument("series", help="the series directory holding the episodes")
     scene_list.add_argument("--episode", action="append", help="only episodes containing this")
+
+    song = command("song", cmd_song, "analyse a song: beats, bars, sections, excerpt, slots")
+    song.add_argument("series", help="the series directory holding the episodes")
+    song.add_argument("song", help="an audio file, or a .cue sheet of a CD image")
+    song.add_argument("--track", type=int, help="track number in the .cue sheet (default 1)")
+    song.add_argument("--shots", type=int, default=60, help="how many shots can fill slots")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")
