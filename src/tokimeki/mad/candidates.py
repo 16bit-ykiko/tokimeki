@@ -118,7 +118,9 @@ def find_candidates(
     episodes: Sequence[Episode],
     boost: Mapping[str, float],
     min_presence: float,
+    only: Sequence[int] | None = None,
 ) -> list[Candidate]:
+    """Candidate shots; with `only`, exactly those kept shots (by id), whoever is in them."""
     out: list[Candidate] = []
     for episode in episodes:
         cast = named_cast_by_shot(ctx.conn, episode.id)
@@ -133,7 +135,10 @@ def find_candidates(
         for shot in list_shots(ctx.conn, episode.id, ShotStatus.KEPT):
             here = dict(cast.get(shot.id, []))
             target = here.get(character)
-            if target is None or target.presence < min_presence or shot.id in parts:
+            if only is not None:
+                if shot.id not in only:
+                    continue
+            elif target is None or target.presence < min_presence or shot.id in parts:
                 continue
             if (
                 episode.seconds(shot.end_frame) - episode.seconds(shot.start_frame)
@@ -152,8 +157,8 @@ def find_candidates(
                     episode,
                     shot,
                     scene_of.get(shot.id, -1),
-                    target.presence,
-                    target.face_height,
+                    target.presence if target else 0.0,
+                    target.face_height if target else 0.0,
                     tuple(name for name in here if name != character),
                     tuple(tag_stats(ctx.conn, [shot.id])),
                     frames,

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tokimeki.mad import make as mad
 from tokimeki.mad.plan import Preferences
+from tokimeki.mad.render import FINAL, PREVIEW
 from tokimeki.report import build_report
 from tokimeki.song.analysis import analyse_song
 from tokimeki.song.slots import first_chorus, make_slots
@@ -137,11 +138,22 @@ def cmd_mad_plan(args: argparse.Namespace) -> int:
     if args.prompt:
         print(f"prompt: {mad.write_prompt(ctx, name, prefs, episodes)}")
     plan = mad.make_plan(ctx, name, prefs, episodes, str(args.arranger))
+    plan = mad.place(plan, mad.plan_candidates(ctx, plan))
     print(f"plan: {mad.save_plan(ctx, plan)}")
     for clip in plan.clips:
         slot = plan.slots[clip.slot]
         where = f"{slot.index:3} {slot.section:10} {slot.start:6.2f}s"
         print(f"  {where}  shot {clip.shot:5}  {clip.reason}")
+    return 0
+
+
+def cmd_mad_render(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    name: str = args.name
+    which: str = args.quality
+    settings = {"preview": [PREVIEW], "final": [FINAL], "both": [PREVIEW, FINAL]}[which]
+    for path in mad.finish(ctx, mad.load_plan(ctx, name), settings):
+        print(path)
     return 0
 
 
@@ -239,6 +251,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--guidance", default="", help="free text for a model arranger")
     plan.add_argument("--arranger", default=mad.HEURISTIC, help="heuristic or model:<provider>")
     plan.add_argument("--prompt", action="store_true", help="also write the model prompt")
+    render = mad_sub.add_parser("render", help="render plan.json; export timeline.otio and report")
+    render.set_defaults(handler=cmd_mad_render)
+    render.add_argument("series", help="the series directory holding the episodes")
+    render.add_argument("name", help="the MAD's name")
+    render.add_argument("--quality", choices=("preview", "final", "both"), default="both")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")

@@ -33,10 +33,10 @@ First series: _To LOVE-Ru Darkness_ and _Darkness 2nd_ (12 + 14 = 26 episodes).
 
 1. **Song.** A song is an audio file or a track of a CD image (`.cue`). Beat This! (on CUDA) gives beats and downbeats; bars follow the downbeat phase most detections agree on (4/4). `allin1` is not used: it needs natten and madmom, which do not build for this PyTorch. Sections instead come from novelty in the bar self-similarity matrix and from the vocal line, which a CD's "(Instrumental)" track gives for free (whatever the mix has on top of it is the voice); the loudest repeated sung section is the chorus. MORE&MORE: 176.5 bpm, intro 0.9–16 s, verse to 58.2 s, first chorus to 81.1 s. The default excerpt runs from the top through the first chorus, kept within 45–90 s. Slots: a cut a bar in verses and every two beats in the chorus, slowed section by section (verse first, chorus last, never past 4 s a slot) until there are no more slots than usable shots. Analyses are cached in `.tokimeki/songs/<song>/analysis.json` (`tokimeki song`). TODO: lyrics timeline, energy accents within a bar.
 2. **Arrangement.** The edit plan (`.tokimeki/mads/<name>/plan.json`, `mad/plan.py`) is the single source of truth: the request (character, song, excerpt, beats per slot, tag boosts, free-text guidance), the slots, and one clip per slot (episode, shot, the reason, later its source window and speed). Candidates are kept shots of the character outside the OP/ED, each with its expression tags per sampled frame and its cutest moment. A deterministic arranger fills the slots today: everyday moments in the verse, an establishing look in the intro, the cutest close-ups in the chorus, her best smile on the last slot, no shot twice, story order within a section with close-ups and wider shots alternating. A model arranger plugs in behind `TextModel` (`mad/model_arranger.py`): the prompt, the answer's JSON schema and its validation (every slot once, no repeats, long enough) are in place, with one retry that lists the problems; no provider is configured until an API is chosen (`tokimeki mad plan … --prompt` writes the prompt for inspection). Only text about kept shots goes into it. TODO: picture answering the lyrics.
-3. **Cut placement (algorithm).** Within each chosen shot, pick the stretch whose expression peaks (per-frame tag scores), and land motion onsets (head turns, blinks, jumps; frame difference or optical flow) on the beat. Speed 0.9–1.1× to fit; anime animated on twos and threes hides it.
+3. **Cut placement.** Slots start and end on beats, and each slot gets a whole number of output frames counted from the excerpt's start, so every cut lands on the frame nearest its beat. Within each chosen shot the clip is the stretch centred on the cutest sampled frame (expression tags weighted by `CUTE`), kept two frames off the shot's edges and slowed to as little as 0.9× when the shot is a little short. TODO: land motion onsets (head turns, blinks, jumps) on the beat.
 4. **Sound.** The song is the main track; lines worth keeping are separated with Demucs and placed in the song's gaps, with the music ducked.
 5. **Picture.** Mostly hard cuts; an occasional flash or push-in on strong beats; slow pan/zoom on still shots; a 9:16 crop from the face boxes if wanted.
-6. **Render and iterate.** The edit plan JSON is the single source of truth. Each clip is rendered on its own with ffmpeg (NVENC), cached by a hash of its parameters, then concatenated and mixed; a change re-renders only the clips it touches. Low-res previews first; you say what to change ("more embarrassed ones in the second chorus", "too choppy here"), the plan is edited, the preview re-rendered. Final: full-quality render plus an OpenTimelineIO export for DaVinci Resolve (or a CapCut/剪映 draft) for hand polish — one way: edits made there do not come back.
+6. **Render and iterate.** The edit plan JSON is the single source of truth. Each clip is decoded with NVDEC, scaled and retimed on the GPU and encoded with NVENC on its own, cached in `cache/clips/` by a hash of its parameters, then the clips are joined and the song excerpt laid under them; a change re-renders only the clips it touches (`tokimeki mad render`: a 640×360 preview and the 1080p final, `timeline.otio` for an editor, and `report.html` with every cut, its peak frame and why it was chosen). A plan can only use kept shots: anything else is refused before rendering. Low-res previews first; you say what to change ("more embarrassed ones in the second chorus", "too choppy here"), the plan is edited, the preview re-rendered. Final: full-quality render plus an OpenTimelineIO export for DaVinci Resolve (or a CapCut/剪映 draft) for hand polish — one way: edits made there do not come back.
 
 ## Sources
 
@@ -57,6 +57,17 @@ explorer.exe "$(wslpath -w ~/anime/to-love-ru-darkness/.tokimeki/report/index.ht
 
 The report is one static page in the data directory: totals (shots, kept, dropped and the drop rate, with no images of dropped shots), the character clusters with sample faces, ids and WD14 name hints, and every kept shot with a thumbnail, time range, cast (framing and presence) and top WD14 tags. It is rebuilt from scratch each time, so no image outlives a shot the filter later drops.
 
+### A MAD
+
+```bash
+pixi run tokimeki song ~/anime/to-love-ru-darkness ~/anime/to-love-ru-darkness/music/momo-single/GNCA-0262.cue --track 1
+pixi run tokimeki mad plan ~/anime/to-love-ru-darkness momo-ep1 \
+    --song ~/anime/to-love-ru-darkness/music/momo-single/GNCA-0262.cue --track 1 --character 梦梦
+pixi run tokimeki mad render ~/anime/to-love-ru-darkness momo-ep1            # preview, final, timeline, report
+```
+
+Knobs of `mad plan`: `--start/--end` (excerpt, song seconds), `--beats chorus=2` (beats per slot for a section), `--boost blush=2` (favour an expression), `--min-presence 0.5` (how much of a shot she must be in), `--episode` (which episodes), `--guidance "…"` and `--arranger model:<provider>` (a model arranger, once an API is chosen; `--prompt` writes what it would be sent). Editing `plan.json` by hand and running `mad render` again also works: clear a clip's `source_start` to have it placed again.
+
 ## Layout and data
 
 - The repository holds code only. Episodes, songs and everything derived live in a data directory outside it.
@@ -68,7 +79,8 @@ The report is one static page in the data directory: totals (shots, kept, droppe
       library.db                      # the series library (SQLite)
       cache/frames/<episode id>/      # sampled frames as JPEG; regenerable, safe to delete
       songs/<song>/analysis.json      # beats, bars, sections of a song
-      mads/<name>/plan.json           # a MAD's edit plan (and prompt.md, renders, report)
+      cache/clips/<hash>.mp4          # rendered clips, reused while their parameters stay the same
+      mads/<name>/                    # plan.json, preview.mp4, final.mp4, timeline.otio, report.html
       report/index.html               # the static review page and its images
   ```
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.

@@ -42,6 +42,7 @@ rotary-embedding-torch = "*"
 transnetv2-pytorch = "==1.0.5"
 silero-vad = "==6.2.3"
 beat-this = "==1.1.0"
+opentimelineio = "==0.18.1"
 
 # beat-this wants torchaudio (and soxr) only for audio loading and its mel front end, which
 # models/beats.py replaces; conda-forge has no torchaudio for this PyTorch.
