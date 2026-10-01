@@ -96,3 +96,18 @@ def decode_audio(
     if channels == 1:
         return samples
     return np.ascontiguousarray(samples.reshape(-1, channels).T)
+
+
+def encode_audio(samples: NDArray[np.float32], sample_rate: int, path: Path) -> None:
+    """Write `(channels, samples)` float audio to `path` (the format follows its suffix)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f"{path.stem}.part{path.suffix}")
+    channels = samples.shape[0]
+    args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-threads", "1"]
+    args += ["-f", "f32le", "-ar", str(sample_rate), "-ac", str(channels), "-i", "pipe:0"]
+    args += [str(partial)]
+    data = np.ascontiguousarray(samples.T, dtype=np.float32).tobytes()
+    result = subprocess.run(args, input=data, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise AudioError(f"writing {path} failed: {result.stderr.decode().strip()}")
+    partial.replace(path)

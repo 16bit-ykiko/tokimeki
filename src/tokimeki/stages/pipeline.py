@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tokimeki.library.episodes import list_episodes, stage_done
 from tokimeki.library.records import Episode, ShotStatus
 from tokimeki.library.shots import status_counts
-from tokimeki.stages import cast, content_filter, lines, scenes, shots
+from tokimeki.stages import cast, content_filter, lines, scenes, shots, voice
 from tokimeki.stages.base import Context
 
 
@@ -21,6 +21,7 @@ STAGES = (
     Stage(cast.NAME, cast.run, cast.reset),
     Stage(lines.NAME, lines.run, lines.reset),
     Stage(scenes.NAME, scenes.run, scenes.reset),
+    Stage(voice.NAME, voice.run, voice.reset),
 )
 STAGE_NAMES = tuple(stage.name for stage in STAGES)
 

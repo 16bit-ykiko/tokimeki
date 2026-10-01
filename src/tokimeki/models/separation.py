@@ -1,8 +1,12 @@
-"""Vocal separation with MDX-Net (UVR's Kim_Vocal_2, ONNX on CUDA), for the vocal line.
+"""Vocal separation with MDX-Net (UVR's Kim_Vocal_2, ONNX on CUDA).
 
-Only how much of the mix is voice is needed, so the separated spectrogram is compared with
-the mix's directly and never turned back into audio.
+For a song's vocal line only how much of the mix is voice is needed, so the separated
+spectrogram is compared with the mix's directly. For an episode's dialogue the voice is
+turned back into audio, chunk by chunk with the chunk edges trimmed as UVR does.
 """
+
+from collections.abc import Callable
+from typing import cast
 
 import numpy as np
 import torch
@@ -23,6 +27,10 @@ CHUNK = HOP * (FRAMES - 1)
 FPS = SAMPLE_RATE / HOP
 VOCAL_BAND = (200.0, 5000.0)
 BATCH_SIZE = 1
+_istft = cast(Callable[..., torch.Tensor], torch.istft)
+TRIM = N_FFT // 2
+"""Samples dropped at each end of a chunk's output, where the STFT has no context."""
+STEP = CHUNK - 2 * TRIM
 
 
 def mdx_input(chunks: torch.Tensor, window: torch.Tensor) -> torch.Tensor:
@@ -34,6 +42,35 @@ def mdx_input(chunks: torch.Tensor, window: torch.Tensor) -> torch.Tensor:
     )
     parts = torch.view_as_real(spec).permute(0, 3, 1, 2)
     return parts.reshape(n, 4, N_FFT // 2 + 1, FRAMES)[:, :, :BINS].contiguous()
+
+
+def mdx_output(spec: torch.Tensor, window: torch.Tensor) -> torch.Tensor:
+    """The model's `(n, 4, BINS, FRAMES)` output back to `(n, 2, CHUNK)` stereo audio."""
+    n = len(spec)
+    full = torch.nn.functional.pad(spec, (0, 0, 0, N_FFT // 2 + 1 - BINS))
+    parts = full.reshape(n * 2, 2, N_FFT // 2 + 1, FRAMES).permute(0, 2, 3, 1).contiguous()
+    audio = _istft(
+        torch.view_as_complex(parts), N_FFT, HOP, window=window, center=True, length=CHUNK
+    )
+    return audio.reshape(n, 2, CHUNK)
+
+
+def separate_chunks(
+    stereo: NDArray[np.float32],
+    model: Callable[[torch.Tensor], torch.Tensor],
+    window: torch.Tensor,
+) -> NDArray[np.float32]:
+    """Run `model` (spectrogram in, voice spectrogram out) over `(2, samples)` audio in
+    overlapping chunks, keeping the middle of each, and return the voice as audio."""
+    length = stereo.shape[1]
+    padded = np.pad(stereo, ((0, 0), (TRIM, TRIM + (-length) % STEP)))
+    out = np.zeros((2, padded.shape[1] - 2 * TRIM), dtype=np.float32)
+    with torch.inference_mode():
+        for start in range(0, out.shape[1], STEP):
+            chunk = torch.tensor(padded[None, :, start : start + CHUNK], device=window.device)
+            voice = mdx_output(model(mdx_input(chunk, window)), window)
+            out[:, start : start + STEP] = voice[0, :, TRIM : TRIM + STEP].cpu().numpy()
+    return out[:, :length]
 
 
 def band_mask(device: torch.device) -> torch.Tensor:
@@ -69,6 +106,16 @@ class VocalSeparator:
                 shares.append((voice_energy / (mix_energy + 1e-9)).reshape(-1))
         frames = int(np.ceil(length / HOP))
         return torch.cat(shares)[:frames].clamp(0, 1).cpu().numpy().astype(np.float32)
+
+    def separate(self, stereo: NDArray[np.float32]) -> NDArray[np.float32]:
+        """The voice in 44.1 kHz stereo `(2, samples)` audio, as audio of the same shape."""
+        name = self._model.input_names[0]
+
+        def run(spec: torch.Tensor) -> torch.Tensor:
+            out = self._model.run({name: spec.cpu().numpy()})[0]
+            return torch.tensor(out, device=self._device)
+
+        return separate_chunks(stereo, run, self._window)
 
     def close(self) -> None:
         self._model.close()

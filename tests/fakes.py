@@ -11,7 +11,7 @@ from PIL import Image
 from tokimeki.media.audio import AudioStream
 from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import cast, content_filter, frames, lines, shots
+from tokimeki.stages import cast, content_filter, frames, lines, shots, voice
 
 FRAMES = 72
 CUT = 24
@@ -122,6 +122,22 @@ def fake_audio(
     return np.zeros(sample_rate * 40, dtype=np.float32)
 
 
+class FakeSeparator:
+    """Half of the mix is voice."""
+
+    def separate(self, stereo: NDArray[np.float32]) -> NDArray[np.float32]:
+        return stereo * 0.5
+
+    def close(self) -> None:
+        pass
+
+
+def fake_stereo(
+    path: Path, sample_rate: int, stream_index: int | None = None, channels: int = 2
+) -> NDArray[np.float32]:
+    return np.full((channels, sample_rate * 3), 0.2, dtype=np.float32)
+
+
 def fake_main_audio(path: Path) -> AudioStream:
     return AudioStream(1, "flac", "jpn", "", True, False)
 
@@ -136,6 +152,9 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lines, "SileroVad", FakeVad)
     monkeypatch.setattr(lines, "decode_audio", fake_audio)
     monkeypatch.setattr(lines, "main_audio", fake_main_audio)
+    monkeypatch.setattr(voice, "VocalSeparator", FakeSeparator)
+    monkeypatch.setattr(voice, "decode_audio", fake_stereo)
+    monkeypatch.setattr(voice, "main_audio", fake_main_audio)
 
 
 def unsafe_everything(self: FakeTagger, batch: NDArray[np.float32]) -> list[Prediction]:
