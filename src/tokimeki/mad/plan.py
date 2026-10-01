@@ -40,6 +40,11 @@ class SlotPlan:
     speed: float | None = None
     section: str = ""
     episode: str = ""
+    sync: bool | None = None
+    """Shift the window so a motion onset lands on the cut or `accent`. Unset: only windows
+    refine fills itself; true: the plan's own window too; false: never."""
+    accent: float | None = None
+    """A beat inside the slot (song seconds) a motion onset should land on."""
 
     @property
     def duration(self) -> float:
@@ -121,6 +126,10 @@ class Plan:
                 out["section"] = s.section
             if s.episode:
                 out["episode"] = s.episode
+            if s.sync is not None:
+                out["sync"] = s.sync
+            if s.accent is not None:
+                out["accent"] = round(s.accent, 4)
             return out
 
         def voice(v: VoicePlan) -> Json:
@@ -235,6 +244,8 @@ class Plan:
                     speed=number(s, "speed", where, optional=True),
                     section=text(s, "section", where, ""),
                     episode=text(s, "episode", where, ""),
+                    sync=flag(s, "sync", where, True) if "sync" in s else None,
+                    accent=number(s, "accent", where, optional=True),
                 )
             )
         raw_voices = d.get("voices", [])
@@ -344,6 +355,17 @@ PLAN_JSON_SCHEMA: Json = {
                     "episode": {
                         "type": "string",
                         "description": "Informational: the shot's episode.",
+                    },
+                    "sync": {
+                        "type": "boolean",
+                        "description": "Shift the window (same length and speed, peak kept"
+                        " inside) so a motion onset lands on the cut or `accent`. Unset: only"
+                        " windows refine fills; true: this window too; false: never.",
+                    },
+                    "accent": {
+                        "type": "number",
+                        "description": "A beat inside the slot (song seconds) for a motion"
+                        " onset to land on, e.g. one of the context's accents.",
                     },
                 },
             },

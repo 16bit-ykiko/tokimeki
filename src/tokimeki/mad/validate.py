@@ -192,6 +192,12 @@ def _timing(plan: Plan, analysis: SongAnalysis) -> list[Issue]:
                         f"{name} {t:.3f}s is {t - beat:+.3f}s from the nearest beat ({beat:.3f}s)",
                     )
                 )
+        if slot.accent is not None:
+            beat = nearest(grid, slot.accent)
+            if not slot.start < slot.accent < slot.end or abs(beat - slot.accent) > BEAT_TOLERANCE:
+                issues.append(
+                    _error("slot.accent", i, f"accent {slot.accent:.3f}s is not a beat inside it")
+                )
         if slot.duration < MIN_SLOT:
             issues.append(
                 _error("slot.too_short", i, f"{slot.duration:.2f}s is shorter than {MIN_SLOT}s")

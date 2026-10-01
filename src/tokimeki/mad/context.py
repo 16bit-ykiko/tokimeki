@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from tokimeki.library.records import Episode
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.mix import DUCK_DB
+from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
@@ -30,7 +31,23 @@ def _r(x: float, digits: int = 2) -> float:
     return round(x, digits)
 
 
-def _shot(ctx: Context, c: Candidate) -> Json:
+ONSETS_PER_SHOT = 3
+
+
+def _motion(m: ShotMotion | None) -> Json | None:
+    if m is None:
+        return None
+    strongest = sorted(m.onsets, key=lambda o: -o.strength)[:ONSETS_PER_SHOT]
+    return {
+        "still": m.still,
+        "moving": _r(m.moving),
+        "onsets": [
+            [_r(o.time), _r(o.strength, 3)] for o in sorted(strongest, key=lambda o: o.time)
+        ],
+    }
+
+
+def _shot(ctx: Context, c: Candidate, motion: ShotMotion | None) -> Json:
     seen = [f for f in c.frames if f.face > 0] or list(c.frames)
     peaks: list[Json] = []
     for f in sorted(seen, key=lambda f: -f.cuteness)[:PEAKS_PER_SHOT]:
@@ -47,6 +64,7 @@ def _shot(ctx: Context, c: Candidate) -> Json:
         "face": _r(c.face_height),
         "with": list(c.others),
         "peaks": peaks,
+        "motion": _motion(motion),
         "keyframe": str(ctx.paths.frame_path(c.episode.id, frame)),
     }
 
@@ -103,6 +121,7 @@ def build_context(
     fixed: Mapping[str, int] | None = None,
 ) -> Json:
     candidates = find_candidates(ctx, character, episodes, boost, min_presence)
+    moves = motions(ctx.paths, [(c.episode, c.shot) for c in candidates])
     by_scene: dict[tuple[str, int], list[Candidate]] = {}
     for c in candidates:
         by_scene.setdefault((c.episode.path, c.scene), []).append(c)
@@ -123,7 +142,7 @@ def build_context(
                     "end": _r(summary.end),
                     "cast": {name: _r(share) for name, share in summary.cast},
                     "lines": [[_r(x.start), x.text.replace("\n", " ")] for x in summary.lines],
-                    "shots": [_shot(ctx, c) for c in members],
+                    "shots": [_shot(ctx, c, moves.get(c.shot.id)) for c in members],
                 }
             )
         for x in usable_lines(ctx, episode):
@@ -167,6 +186,9 @@ def build_context(
             "face": "her largest face height as a share of the frame (close-up >= 0.35)",
             "peaks": "her cutest sampled moments: episode second, score, WD14 expression tags",
             "keyframe": "the cached frame at the best peak",
+            "motion": "still: hardly moves (drift suits it); moving: share of frames that move;"
+            " onsets: [episode second, share of pixels changed] where movement starts, which"
+            " refine lands on the cut or a slot's accent",
             "voice_lines": "lines a voice may come from (subtitle times; refine trims to the"
             " voice); speakers are unknown, on_screen says who is seen while it is said",
         },

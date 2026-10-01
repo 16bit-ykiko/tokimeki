@@ -6,7 +6,7 @@ prints these results; an MCP server can expose the same functions as tools uncha
 
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
@@ -19,6 +19,7 @@ from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
 from tokimeki.mad.fonts import FontError, prepare_fonts
+from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import (
     PLAN_JSON_SCHEMA,
     Plan,
@@ -41,7 +42,7 @@ from tokimeki.song.analysis import (
     slots_over,
 )
 from tokimeki.song.lyrics import LyricSource, pair
-from tokimeki.stages import voice
+from tokimeki.stages import motion, voice
 from tokimeki.stages.base import Context, open_series, register_episodes
 
 type Json = dict[str, object]
@@ -207,6 +208,18 @@ def _plan_candidates(ctx: Context, plan: Plan) -> dict[int, Candidate]:
     return found
 
 
+def _motion(ctx: Context, candidates: Iterable[Candidate]) -> Mapping[int, ShotMotion]:
+    _ensure_motion(ctx, list({c.episode.id: c.episode for c in candidates}.values()))
+    return motions(ctx.paths, [(c.episode, c.shot) for c in candidates])
+
+
+def _ensure_motion(ctx: Context, episodes: Sequence[Episode]) -> None:
+    """Measure the motion of episodes that have not been yet (the `motion` stage, GPU)."""
+    todo = [e for e in episodes if not stage_done(ctx.conn, e.id, motion.NAME)]
+    if todo:
+        motion.run(ctx, todo)
+
+
 def _report(plan: Plan, issues: list[Issue]) -> Json:
     errors = [i for i in issues if i.level == "error"]
     return {
@@ -242,7 +255,7 @@ def _refined(plan: Plan) -> tuple[Context, Plan, SongAnalysis, dict[int, Candida
     if analysis is None:
         raise ApiError("the plan names no song")
     candidates = _plan_candidates(ctx, plan)
-    refined, notes = refine(plan, analysis, candidates)
+    refined, notes = refine(plan, analysis, candidates, _motion(ctx, candidates.values()))
     voices, heard = refine_voices(ctx, refined)
     return ctx, replace(refined, voices=voices), analysis, candidates, notes + heard
 
@@ -291,17 +304,20 @@ def plan_auto(
     if len(slots) > len(candidates):
         raise ApiError(f"{len(slots)} slots but only {len(candidates)} shots; pick a shorter range")
     plan = draft(name, str(ctx.paths.root), character, analysis.id, slots, candidates)
-    refined, _ = refine(plan, analysis, {c.shot.id: c for c in candidates})
+    by_id = {c.shot.id: c for c in candidates}
+    refined, notes = refine(plan, analysis, by_id, _motion(ctx, candidates))
     if voices:
         picked = _draft_voice(ctx, refined, analysis, chosen, character)
         if picked is not None:
-            spoken, _ = refine_voices(ctx, replace(refined, voices=[picked]))
+            spoken, heard = refine_voices(ctx, replace(refined, voices=[picked]))
             refined = replace(refined, voices=spoken)
+            notes += heard
     target = Path(output).expanduser() if output else mad_dir(ctx.paths.root, name) / "plan.json"
     write_plan(refined, target)
     return {
         "path": str(target),
         "plan": refined.to_dict(),
+        "refined": notes,
         "validation": plan_validate(str(target)),
     }
 

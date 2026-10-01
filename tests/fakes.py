@@ -1,6 +1,6 @@
 """Stand-ins for the GPU models and NVDEC, so stage logic is tested anywhere."""
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +11,7 @@ from PIL import Image
 from tokimeki.media.audio import AudioStream
 from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import cast, content_filter, frames, lines, shots, voice
+from tokimeki.stages import cast, content_filter, frames, lines, motion, shots, voice
 
 FRAMES = 72
 CUT = 24
@@ -138,6 +138,38 @@ def fake_stereo(
     return np.full((channels, sample_rate * 3), 0.2, dtype=np.float32)
 
 
+JUMP = 40
+"""The frame where the fake picture changes sharply."""
+
+
+def fake_luma(
+    path: Path, width: int, height: int, ranges: Sequence[tuple[int, int]], chunk: int = 512
+) -> Iterator[NDArray[np.uint8]]:
+    """Grey frames that step from 50 to 200 at frame `JUMP`, in chunks of 16."""
+    if not ranges:
+        return
+    indices = np.concatenate([np.arange(a, b) for a, b in ranges])
+    values = np.where(indices >= JUMP, 200, 50).astype(np.uint8)
+    frames = np.repeat(values[:, None, None], 9, axis=1).repeat(16, axis=2)
+    for i in range(0, len(frames), 16):
+        yield frames[i : i + 16]
+
+
+class FakeMeter:
+    def differences(
+        self, frames: NDArray[np.uint8], previous: NDArray[np.uint8] | None
+    ) -> NDArray[np.float32]:
+        x = frames.astype(np.float32) / 255
+        first = previous if previous is not None else frames[0]
+        before = np.concatenate([first[None], frames[:-1]]).astype(np.float32) / 255
+        diff = np.abs(x - before)
+        changed = (diff > 0.04).mean(axis=(1, 2))
+        return np.stack([diff.mean(axis=(1, 2)), changed], axis=1).astype(np.float32)
+
+    def close(self) -> None:
+        pass
+
+
 def fake_main_audio(path: Path) -> AudioStream:
     return AudioStream(1, "flac", "jpn", "", True, False)
 
@@ -155,6 +187,8 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(voice, "VocalSeparator", FakeSeparator)
     monkeypatch.setattr(voice, "decode_audio", fake_stereo)
     monkeypatch.setattr(voice, "main_audio", fake_main_audio)
+    monkeypatch.setattr(motion, "decode_luma", fake_luma)
+    monkeypatch.setattr(motion, "MotionMeter", FakeMeter)
 
 
 def unsafe_everything(self: FakeTagger, batch: NDArray[np.float32]) -> list[Prediction]:

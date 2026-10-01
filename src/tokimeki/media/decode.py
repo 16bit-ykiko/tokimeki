@@ -8,7 +8,7 @@ run fails instead.
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -92,6 +92,60 @@ def decode_for_transnet(path: Path, width: int, height: int) -> NDArray[np.uint8
     if len(raw) % frame_bytes:
         raise DecodeError(f"{path}: decoder returned a partial frame")
     return np.frombuffer(raw, dtype=np.uint8).reshape(-1, th, tw, 3)
+
+
+MOTION_SIZE = (160, 90)
+
+
+def _ranges_expr(ranges: Sequence[tuple[int, int]]) -> str:
+    """True for frames in any `[first, end)` range: a balanced `if(lt(n, k), …)` tree."""
+    if len(ranges) == 1:
+        first, end = ranges[0]
+        return f"between(n\\,{first}\\,{end - 1})"
+    mid = len(ranges) // 2
+    left, right = _ranges_expr(ranges[:mid]), _ranges_expr(ranges[mid:])
+    return f"if(lt(n\\,{ranges[mid][0]})\\,{left}\\,{right})"
+
+
+def decode_luma(
+    path: Path,
+    width: int,
+    height: int,
+    ranges: Sequence[tuple[int, int]],
+    chunk: int = 512,
+) -> Iterator[NDArray[np.uint8]]:
+    """The luma of the frames in `[first, end)` frame ranges (sorted, apart), scaled down to
+    `MOTION_SIZE` on the GPU, in chunks of `(frames, height, width)`.
+
+    Frames outside the ranges are dropped on the GPU, before anything is copied back.
+    """
+    if not ranges:
+        return
+    w, h = MOTION_SIZE
+    chain = [f"select={_ranges_expr(ranges)}", *gpu_resize(width, height, w, h), "hwdownload"]
+    chain.append("format=nv12")
+    with tempfile.TemporaryDirectory(prefix="tokimeki-motion-") as tmp:
+        script = Path(tmp) / "filter.txt"
+        script.write_text(",".join(chain))
+        args = [*_input(path), "-/vf", str(script), "-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"]
+        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert process.stdout is not None and process.stderr is not None
+        frame_bytes = w * h * 3 // 2
+        try:
+            while True:
+                data = process.stdout.read(frame_bytes * chunk)
+                if not data:
+                    break
+                if len(data) % frame_bytes:
+                    raise DecodeError(f"{path}: decoder returned a partial frame")
+                frames = np.frombuffer(data, dtype=np.uint8).reshape(-1, frame_bytes)
+                yield frames[:, : w * h].reshape(-1, h, w)
+        finally:
+            process.stdout.close()
+            stderr = process.stderr.read().decode(errors="replace").strip()
+            process.stderr.close()
+            if process.wait() != 0:
+                raise DecodeError(f"NVDEC motion decode failed (no CPU fallback):\n{stderr}")
 
 
 def frame_size(width: int, height: int, max_height: int = FRAME_HEIGHT) -> tuple[int, int]:
