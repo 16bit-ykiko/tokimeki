@@ -7,7 +7,8 @@ import torch
 
 from tokimeki.media.cue import cue_time, parse_cue
 from tokimeki.models.beats import chunk_starts, log_mel, mel_filters, pick_peaks, snap_downbeats
-from tokimeki.song.analysis import Song, SongAnalysis
+from tokimeki.song.analysis import SongSource, lyrics_share, song_id
+from tokimeki.song.lyrics import LyricLine, parse_lrc
 from tokimeki.song.slots import Excerpt, first_chorus, make_slots
 from tokimeki.song.structure import (
     Section,
@@ -127,13 +128,6 @@ def test_sections_are_found_and_named() -> None:
     assert sections[2].group == sections[4].group
 
 
-def _analysis(sections: list[Section], bpm: float = 120.0) -> SongAnalysis:
-    end = sections[-1].end
-    beats = [float(b) for b in np.arange(0, end, 60 / bpm)]
-    song = Song("s", "s", Path("s.flac"), 0.0, end)
-    return SongAnalysis(song, bpm, beats, beats[::4], [], [], sections, True)
-
-
 def _section(label: str, start: float, end: float) -> Section:
     return Section(label, 0, int(start / 2), int(end / 2), start, end, 0.5, 1.0)
 
@@ -141,22 +135,62 @@ def _section(label: str, start: float, end: float) -> Section:
 def test_excerpt_runs_to_the_first_chorus_within_limits() -> None:
     sections = [_section("intro", 0, 16), _section("verse", 16, 48), _section("chorus", 48, 80),
                 _section("verse", 80, 112), _section("chorus", 112, 144)]  # fmt: skip
-    excerpt = first_chorus(_analysis(sections))
+    excerpt = first_chorus(sections)
     assert (excerpt.start, excerpt.end) == (0, 80)
     long = [_section("intro", 0, 30), _section("verse", 30, 70), _section("chorus", 70, 110)]
-    assert first_chorus(_analysis(long)).start == 30
+    assert first_chorus(long).start == 30
 
 
 def test_slots_slow_down_to_fit_the_shots() -> None:
     sections = [_section("intro", 0, 8), _section("verse", 8, 24), _section("chorus", 24, 40)]
-    analysis = _analysis(sections)
+    beats = [float(b) for b in np.arange(0, 40, 0.5)]
     excerpt = Excerpt(0, 40, sections)
-    fast = make_slots(analysis, excerpt, 100)
+    fast = make_slots(beats, 120.0, excerpt, 100)
     assert len(fast) == 4 + 8 + 16
-    fitted = make_slots(analysis, excerpt, 22)
+    fitted = make_slots(beats, 120.0, excerpt, 22)
     assert {s.section: s.beats for s in fitted} == {"intro": 8, "verse": 8, "chorus": 2}
     assert len(fitted) == 22
-    tight = make_slots(analysis, excerpt, 20)
+    tight = make_slots(beats, 120.0, excerpt, 20)
     assert {s.section: s.beats for s in tight}["chorus"] == 4
     assert tight[0].start == 0 and tight[-1].end == 40
     assert all(b.start == a.end for a, b in pairwise(tight))
+
+
+def test_lrc_lines_end_where_the_next_begins() -> None:
+    text = (
+        "[ti:MORE&MORE]\n[offset:+500]\n[00:12.00]もっと<00:12.50>もっと\n"
+        "[00:15.30][01:02.00]好きよ\n[00:20.00]\n"
+    )
+    lines = parse_lrc(text)
+    assert [(x.start, x.end, x.text) for x in lines] == [
+        (11.5, 14.8, "もっともっと"),
+        (14.8, 19.5, "好きよ"),
+        (61.5, 66.5, "好きよ"),
+    ]
+
+
+def test_lyrics_give_the_vocal_line() -> None:
+    lines = [LyricLine(2.0, 4.0, "a")]
+    share = lyrics_share(lines, np.array([0.0, 2.0, 4.0]), 6.0)
+    assert share.tolist() == [0.0, 1.0, 0.0]
+
+
+def test_songs_without_a_vocal_line_get_an_intro_from_loudness() -> None:
+    features, _, loud = _song_like()
+    bars = np.arange(len(features), dtype=np.float64) * 2.0
+    ones = np.ones(len(features))
+    starts = boundaries(novelty(features), ones >= 0.2)
+    sections = merge_runs(
+        label_sections(starts, features, ones, loud, bars, len(bars) * 2.0, vocal_known=False)
+    )
+    assert sections[0].label == "intro" and sections[-1].label == "outro"
+    assert "chorus" in [s.label for s in sections]
+
+
+def test_song_ids_are_readable_and_stable(tmp_path: Path) -> None:
+    source = SongSource(tmp_path / "a.flac", 0.0, 100.0, "MORE&MORE", 1)
+    assert song_id(source).startswith("more-more-")
+    assert song_id(source) == song_id(source)
+    assert song_id(SongSource(tmp_path / "a.flac", 232.1, 100.0, "そして君と", 2)).startswith(
+        "song-"
+    )

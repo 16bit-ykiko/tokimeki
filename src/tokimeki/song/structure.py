@@ -125,9 +125,13 @@ def label_sections(
     loudness: NDArray[np.float64],
     bars: NDArray[np.float64],
     end: float,
+    vocal_known: bool = True,
 ) -> list[Section]:
     """Name the sections: repeated loud sung material is the chorus, what leads into it the
-    pre-chorus, unsung parts intro/interlude/outro, the rest verses (bridge if heard once, late)."""
+    pre-chorus, unsung parts intro/interlude/outro, the rest verses (bridge if heard once, late).
+
+    Without a vocal line (`vocal_known` false) only a quieter first or last section becomes
+    the intro or outro."""
     n = len(bars)
     spans = list(zip(starts, [*starts[1:], n], strict=True))
     means = np.array([features[a:b].mean(axis=0) for a, b in spans])
@@ -148,6 +152,12 @@ def label_sections(
     chorus = max(repeated, key=group_loudness, default=-1)
     first_sung = next((i for i, s in enumerate(sung) if s), len(spans))
     last_sung = max((i for i, s in enumerate(sung) if s), default=-1)
+    if not vocal_known and len(spans) > 2:
+        quiet = float(np.mean(loud))
+        sung[0] = loud[0] >= quiet
+        sung[-1] = loud[-1] >= quiet
+        first_sung = 0 if sung[0] else 1
+        last_sung = len(spans) - 1 if sung[-1] else len(spans) - 2
     labels: list[str] = []
     for i, group in enumerate(groups):
         if not sung[i]:

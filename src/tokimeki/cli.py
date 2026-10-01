@@ -1,17 +1,14 @@
 """Find the cute moments of anime heroines across a series and cut them into MADs."""
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from tokimeki.mad import make as mad
-from tokimeki.mad.plan import Preferences
-from tokimeki.mad.render import FINAL, PREVIEW
+from tokimeki import api
 from tokimeki.report import build_report
-from tokimeki.song.analysis import analyse_song
-from tokimeki.song.slots import first_chorus, make_slots
 from tokimeki.stages import cast, pipeline, scenes
 from tokimeki.stages.base import open_series, register_episodes
 from tokimeki.stages.selfcheck import run_checks
@@ -85,76 +82,95 @@ def cmd_scenes(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_song(args: argparse.Namespace) -> int:
-    ctx = open_series(_series(args))
-    song_path: str = args.song
-    track: int | None = args.track
-    budget: int = args.shots
-    analysis = analyse_song(ctx.paths, Path(song_path).expanduser(), track)
-    print(f"{analysis.song.title}: {analysis.bpm:.1f} bpm, {len(analysis.bars)} bars")
-    for s in analysis.sections:
-        print(f"  {s.label:10} bars {s.first_bar:3}-{s.end_bar:3}  {s.start:6.1f}-{s.end:6.1f}s")
-    excerpt = first_chorus(analysis)
-    slots = make_slots(analysis, excerpt, budget)
-    print(
-        f"excerpt {excerpt.start:.1f}-{excerpt.end:.1f}s ({excerpt.duration:.1f}s):"
-        f" {len(slots)} slots for up to {budget} shots"
-    )
+def _emit(run: Callable[[], object]) -> int:
+    """Print an API result as JSON; errors too, with exit status 1."""
+    try:
+        result = run()
+    except api.ApiError as error:
+        print(
+            json.dumps(
+                {"error": str(error), "details": error.details}, ensure_ascii=False, indent=1
+            )
+        )
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=1))
     return 0
 
 
-def _pairs(values: list[str] | None, kind: type[float] | type[int]) -> dict[str, float]:
+def _boosts(values: list[str] | None) -> dict[str, float]:
     out: dict[str, float] = {}
     for value in values or []:
-        key, _, number = value.partition("=")
-        out[key.strip()] = kind(number)
+        tag, _, weight = value.partition("=")
+        out[tag.strip()] = float(weight)
     return out
 
 
-def _preferences(args: argparse.Namespace) -> Preferences:
+def cmd_song_analyze(args: argparse.Namespace) -> int:
+    audio: str = args.audio
+    track: int | None = args.track
+    lyrics: str | None = args.lyrics
+    instrumental: str | None = args.instrumental
+    span: str | None = args.range
+    return _emit(lambda: api.song_analyze(audio, track, lyrics, instrumental, span))
+
+
+def cmd_song_show(args: argparse.Namespace) -> int:
     song: str = args.song
-    start: float | None = args.start
-    end: float | None = args.end
-    return Preferences(
-        character=str(args.character),
-        song=str(Path(song).expanduser()),
-        track=args.track,
-        excerpt=(start, end) if start is not None and end is not None else None,
-        beats_per_slot={k: int(v) for k, v in _pairs(args.beats, int).items()},
-        boost=_pairs(args.boost, float),
-        min_presence=float(args.min_presence),
-        guidance=str(args.guidance),
+    return _emit(lambda: api.song_show(song))
+
+
+def cmd_plan_schema(_: argparse.Namespace) -> int:
+    return _emit(api.plan_schema)
+
+
+def cmd_plan_context(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    episodes: list[str] | None = args.episode
+    song: str | None = args.song
+    presence: float = args.min_presence
+    boost = _boosts(args.boost)
+    return _emit(lambda: api.plan_context(series, character, episodes, song, presence, boost))
+
+
+def cmd_plan_auto(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    song: str = args.song
+    name: str = args.name
+    episodes: list[str] | None = args.episode
+    presence: float = args.min_presence
+    boost = _boosts(args.boost)
+    output: str | None = args.output
+    return _emit(
+        lambda: api.plan_auto(series, character, song, name, episodes, presence, boost, output)
     )
 
 
-def cmd_mad_plan(args: argparse.Namespace) -> int:
-    ctx = open_series(_series(args))
-    name: str = args.name
-    episodes = register_episodes(ctx)
-    only: list[str] | None = args.episode
-    if only:
-        episodes = [e for e in episodes if any(part in e.path for part in only)]
-    prefs = _preferences(args)
-    if args.prompt:
-        print(f"prompt: {mad.write_prompt(ctx, name, prefs, episodes)}")
-    plan = mad.make_plan(ctx, name, prefs, episodes, str(args.arranger))
-    plan = mad.place(plan, mad.plan_candidates(ctx, plan))
-    print(f"plan: {mad.save_plan(ctx, plan)}")
-    for clip in plan.clips:
-        slot = plan.slots[clip.slot]
-        where = f"{slot.index:3} {slot.section:10} {slot.start:6.2f}s"
-        print(f"  {where}  shot {clip.shot:5}  {clip.reason}")
-    return 0
+def cmd_plan_validate(args: argparse.Namespace) -> int:
+    plan: str = args.plan
+    status = 0
+
+    def run() -> object:
+        nonlocal status
+        report = api.plan_validate(plan)
+        status = 0 if report["ok"] else 1
+        return report
+
+    return _emit(run) or status
 
 
-def cmd_mad_render(args: argparse.Namespace) -> int:
-    ctx = open_series(_series(args))
-    name: str = args.name
-    which: str = args.quality
-    settings = {"preview": [PREVIEW], "final": [FINAL], "both": [PREVIEW, FINAL]}[which]
-    for path in mad.finish(ctx, mad.load_plan(ctx, name), settings):
-        print(path)
-    return 0
+def cmd_plan_refine(args: argparse.Namespace) -> int:
+    plan: str = args.plan
+    output: str | None = args.output
+    return _emit(lambda: api.plan_refine(plan, output))
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    plan: str = args.plan
+    quality: str = args.quality
+    otio: bool = args.otio
+    return _emit(lambda: api.render_plan(plan, quality, otio))
 
 
 def cmd_cast_list(args: argparse.Namespace) -> int:
@@ -227,35 +243,52 @@ def build_parser() -> argparse.ArgumentParser:
     scene_list.add_argument("series", help="the series directory holding the episodes")
     scene_list.add_argument("--episode", action="append", help="only episodes containing this")
 
-    song = command("song", cmd_song, "analyse a song: beats, bars, sections, excerpt, slots")
-    song.add_argument("series", help="the series directory holding the episodes")
-    song.add_argument("song", help="an audio file, or a .cue sheet of a CD image")
-    song.add_argument("--track", type=int, help="track number in the .cue sheet (default 1)")
-    song.add_argument("--shots", type=int, default=60, help="how many shots can fill slots")
+    song = sub.add_parser("song", help="analyse songs (JSON out)")
+    song_sub = song.add_subparsers(required=True, metavar="action")
+    analyze = song_sub.add_parser("analyze", help="beats, bars, sections, energy, excerpt, slots")
+    analyze.set_defaults(handler=cmd_song_analyze)
+    analyze.add_argument("audio", help="any audio file (a .cue picks a track of a CD image)")
+    analyze.add_argument("--track", type=int, help="track of a .cue sheet (default 1)")
+    analyze.add_argument("--lyrics", help="an LRC file: gives the vocal line and lyric times")
+    analyze.add_argument("--instrumental", help="the song without vocals, for the vocal line")
+    analyze.add_argument("--range", help="the excerpt, e.g. 0:58-1:21 (default: through chorus 1)")
+    show = song_sub.add_parser("show", help="print a stored analysis")
+    show.set_defaults(handler=cmd_song_show)
+    show.add_argument("song", help="song id")
 
-    mad_parser = sub.add_parser("mad", help="plan and render a MAD")
-    mad_sub = mad_parser.add_subparsers(required=True, metavar="action")
-    plan = mad_sub.add_parser("plan", help="choose the excerpt, slots and shots; write plan.json")
-    plan.set_defaults(handler=cmd_mad_plan)
-    plan.add_argument("series", help="the series directory holding the episodes")
-    plan.add_argument("name", help="the MAD's name (its directory under .tokimeki/mads/)")
-    plan.add_argument("--song", required=True, help="an audio file, or a .cue sheet")
-    plan.add_argument("--track", type=int, help="track number in the .cue sheet")
-    plan.add_argument("--character", default="梦梦", help="the named cast cluster to feature")
-    plan.add_argument("--episode", action="append", help="only episodes containing this")
-    plan.add_argument("--start", type=float, help="excerpt start in song seconds")
-    plan.add_argument("--end", type=float, help="excerpt end in song seconds")
-    plan.add_argument("--beats", action="append", help="beats per slot, e.g. chorus=2")
-    plan.add_argument("--boost", action="append", help="weigh an expression tag, e.g. blush=2")
-    plan.add_argument("--min-presence", type=float, default=0.34, help="share of a shot she is in")
-    plan.add_argument("--guidance", default="", help="free text for a model arranger")
-    plan.add_argument("--arranger", default=mad.HEURISTIC, help="heuristic or model:<provider>")
-    plan.add_argument("--prompt", action="store_true", help="also write the model prompt")
-    render = mad_sub.add_parser("render", help="render plan.json; export timeline.otio and report")
-    render.set_defaults(handler=cmd_mad_render)
-    render.add_argument("series", help="the series directory holding the episodes")
-    render.add_argument("name", help="the MAD's name")
-    render.add_argument("--quality", choices=("preview", "final", "both"), default="both")
+    plan = sub.add_parser("plan", help="write and check edit plans (JSON in and out)")
+    plan_sub = plan.add_subparsers(required=True, metavar="action")
+    schema = plan_sub.add_parser("schema", help="the plan's JSON Schema")
+    schema.set_defaults(handler=cmd_plan_schema)
+    context = plan_sub.add_parser("context", help="everything an arranger needs, as one JSON")
+    context.set_defaults(handler=cmd_plan_context)
+    auto = plan_sub.add_parser("auto", help="a draft plan from the heuristic arranger")
+    auto.set_defaults(handler=cmd_plan_auto)
+    for p in (context, auto):
+        p.add_argument("series", help="the series directory holding the episodes")
+        p.add_argument("--character", required=True, help="a named cast cluster, e.g. 梦梦")
+        p.add_argument("--episode", action="append", help="only episodes containing this")
+        p.add_argument("--min-presence", type=float, default=0.34, help="share of a shot she is in")
+        p.add_argument("--boost", action="append", help="weigh an expression tag, e.g. blush=2")
+    context.add_argument("--song", help="song id from `song analyze`, to include its slots")
+    auto.add_argument("--song", required=True, help="song id from `song analyze`")
+    auto.add_argument("--name", required=True, help="the MAD's name")
+    auto.add_argument("-o", "--output", help="where to write the plan (default: the data dir)")
+    check = plan_sub.add_parser("validate", help="every problem with a plan; exit 1 on errors")
+    check.set_defaults(handler=cmd_plan_validate)
+    check.add_argument("plan", help="plan.json")
+    refine = plan_sub.add_parser("refine", help="snap slots to beats, fill windows around peaks")
+    refine.set_defaults(handler=cmd_plan_refine)
+    refine.add_argument("plan", help="plan.json")
+    refine.add_argument("-o", "--output", help="write here instead of over the plan")
+
+    render = command("render", cmd_render, "render a plan into the series' data dir")
+    render.add_argument("plan", help="plan.json")
+    quality = render.add_mutually_exclusive_group()
+    for q in ("preview", "final", "both"):
+        quality.add_argument(f"--{q}", dest="quality", action="store_const", const=q)
+    render.set_defaults(quality="preview")
+    render.add_argument("--otio", action="store_true", help="also write timeline.otio")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")

@@ -31,12 +31,12 @@ First series: _To LOVE-Ru Darkness_ and _Darkness 2nd_ (12 + 14 = 26 episodes).
 
 ## Stage 2: MAD
 
-1. **Song.** A song is an audio file or a track of a CD image (`.cue`). Beat This! (on CUDA) gives beats and downbeats; bars follow the downbeat phase most detections agree on (4/4). `allin1` is not used: it needs natten and madmom, which do not build for this PyTorch. Sections instead come from novelty in the bar self-similarity matrix and from the vocal line, which a CD's "(Instrumental)" track gives for free (whatever the mix has on top of it is the voice); the loudest repeated sung section is the chorus. MORE&MORE: 176.5 bpm, intro 0.9–16 s, verse to 58.2 s, first chorus to 81.1 s. The default excerpt runs from the top through the first chorus, kept within 45–90 s. Slots: a cut a bar in verses and every two beats in the chorus, slowed section by section (verse first, chorus last, never past 4 s a slot) until there are no more slots than usable shots. Analyses are cached in `.tokimeki/songs/<song>/analysis.json` (`tokimeki song`). TODO: lyrics timeline, energy accents within a bar.
-2. **Arrangement.** The edit plan (`.tokimeki/mads/<name>/plan.json`, `mad/plan.py`) is the single source of truth: the request (character, song, excerpt, beats per slot, tag boosts, free-text guidance), the slots, and one clip per slot (episode, shot, the reason, later its source window and speed). Candidates are kept shots of the character outside the OP/ED, each with its expression tags per sampled frame and its cutest moment. A deterministic arranger fills the slots today: everyday moments in the verse, an establishing look in the intro, the cutest close-ups in the chorus, her best smile on the last slot, no shot twice, story order within a section with close-ups and wider shots alternating. A model arranger plugs in behind `TextModel` (`mad/model_arranger.py`): the prompt, the answer's JSON schema and its validation (every slot once, no repeats, long enough) are in place, with one retry that lists the problems; no provider is configured until an API is chosen (`tokimeki mad plan … --prompt` writes the prompt for inspection). Only text about kept shots goes into it. TODO: picture answering the lyrics.
-3. **Cut placement.** Slots start and end on beats, and each slot gets a whole number of output frames counted from the excerpt's start, so every cut lands on the frame nearest its beat. Within each chosen shot the clip is the stretch centred on the cutest sampled frame (expression tags weighted by `CUTE`), kept two frames off the shot's edges and slowed to as little as 0.9× when the shot is a little short. TODO: land motion onsets (head turns, blinks, jumps) on the beat.
+1. **Song.** Any audio file; a track of a CD image (`.cue`) is a convenience. Optional inputs: an LRC lyrics file, an instrumental version, an excerpt range. Beat This! (on CUDA) gives beats and downbeats; bars follow the downbeat phase most detections agree on (4/4). `allin1` is not used: it needs natten and madmom, which do not build for this PyTorch. Sections come from novelty in the bar self-similarity matrix plus the vocal line, which the LRC (lines' times) or the instrumental (whatever the mix has on top of it is the voice) gives; the loudest repeated sung section is the chorus. Without either, only a quieter first or last section becomes intro or outro, and sections are rougher (Silero VAD does not hear singing over a dense mix, so it cannot stand in). MORE&MORE (vocal line from its instrumental track): 176.5 bpm, intro 0.9–16 s, verse to 58.2 s, first chorus to 81.1 s. The default excerpt runs from the top through the first chorus within 45–90 s. Suggested slots: a cut a bar in verses and every two beats in the chorus, slowed section by section (verse first, chorus last, never past 4 s a slot) to the number of usable shots. Analyses live in a song store shared by all series (`$TOKIMEKI_HOME/songs/<id>/`, default `~/.local/share/tokimeki/songs`). TODO: energy accents within a bar.
+2. **Arrangement (an agent, through tools).** Whoever arranges (an agent driving the CLI, later an MCP server over `tokimeki/api.py`, or a person) gets one JSON context, writes a plan, and checks it. The plan (`tokimeki plan schema`) is the single source of truth: song id and, per slot, song start/end on beats, the shot, the source `in`/`out` (episode seconds) and a short `why`. `plan validate` reports every problem with its slot and a stable code (gaps, off-beat boundaries, too-short slots, unknown, dropped or repeated shots, OP/ED shots, windows outside the shot, speed outside 0.9–1.1×); `plan refine` puts boundaries exactly on beats and fills missing windows; `plan auto` writes a heuristic draft to start from (everyday moments in the verse, the cutest close-ups in the chorus, her best smile last, story order, framing alternating). Only kept shots outside the OP/ED appear in the context, so only they can reach a cloud model. TODO: picture answering the lyrics.
+3. **Cut placement.** Each slot gets a whole number of output frames counted from the excerpt's start, so every cut lands on the frame nearest its beat. A clip with no window yet shows the stretch of its shot centred on the cutest sampled frame (expression tags weighted by `CUTE`), two frames off the shot's edges, slowed to as little as 0.9× when the shot is a little short. TODO: land motion onsets (head turns, blinks, jumps) on the beat.
 4. **Sound.** The song is the main track; lines worth keeping are separated with Demucs and placed in the song's gaps, with the music ducked.
 5. **Picture.** Mostly hard cuts; an occasional flash or push-in on strong beats; slow pan/zoom on still shots; a 9:16 crop from the face boxes if wanted.
-6. **Render and iterate.** The edit plan JSON is the single source of truth. Each clip is decoded with NVDEC, scaled and retimed on the GPU and encoded with NVENC on its own, cached in `cache/clips/` by a hash of its parameters, then the clips are joined and the song excerpt laid under them; a change re-renders only the clips it touches (`tokimeki mad render`: a 640×360 preview and the 1080p final, `timeline.otio` for an editor, and `report.html` with every cut, its peak frame and why it was chosen). A plan can only use kept shots: anything else is refused before rendering. Low-res previews first; you say what to change ("more embarrassed ones in the second chorus", "too choppy here"), the plan is edited, the preview re-rendered. Final: full-quality render plus an OpenTimelineIO export for DaVinci Resolve (or a CapCut/剪映 draft) for hand polish — one way: edits made there do not come back.
+6. **Render and iterate.** The edit plan JSON is the single source of truth. Each clip is decoded with NVDEC, scaled and retimed on the GPU and encoded with NVENC on its own, cached in `cache/clips/` by a hash of its parameters, then the clips are joined and the song excerpt laid under them; a change re-renders only the clips it touches (`tokimeki render plan.json --preview|--final|--both [--otio]`: a 640×360 preview and the 1080p final, `timeline.otio` for an editor, and `report.html` with every cut, its frame and why it was chosen). A plan can only use kept shots: anything else is refused before rendering. Low-res previews first; you say what to change ("more embarrassed ones in the second chorus", "too choppy here"), the plan is edited, the preview re-rendered. Final: full-quality render plus an OpenTimelineIO export for DaVinci Resolve (or a CapCut/剪映 draft) for hand polish — one way: edits made there do not come back.
 
 ## Sources
 
@@ -57,16 +57,22 @@ explorer.exe "$(wslpath -w ~/anime/to-love-ru-darkness/.tokimeki/report/index.ht
 
 The report is one static page in the data directory: totals (shots, kept, dropped and the drop rate, with no images of dropped shots), the character clusters with sample faces, ids and WD14 name hints, and every kept shot with a thumbnail, time range, cast (framing and presence) and top WD14 tags. It is rebuilt from scratch each time, so no image outlives a shot the filter later drops.
 
-### A MAD
+### A MAD (for agents and people)
+
+Every command prints JSON; `plan validate` exits 1 when the plan has errors.
 
 ```bash
-pixi run tokimeki song ~/anime/to-love-ru-darkness ~/anime/to-love-ru-darkness/music/momo-single/GNCA-0262.cue --track 1
-pixi run tokimeki mad plan ~/anime/to-love-ru-darkness momo-ep1 \
-    --song ~/anime/to-love-ru-darkness/music/momo-single/GNCA-0262.cue --track 1 --character 梦梦
-pixi run tokimeki mad render ~/anime/to-love-ru-darkness momo-ep1            # preview, final, timeline, report
+S=~/anime/to-love-ru-darkness
+pixi run tokimeki song analyze $S/music/momo-single/GNCA-0262.cue --track 1    # or any audio: --lyrics x.lrc --instrumental y.flac --range 0:58-1:21
+pixi run tokimeki plan context $S --character 梦梦 --episode 01 --song more-more-ff5756b3 > context.json
+pixi run tokimeki plan schema                                               # the plan format
+pixi run tokimeki plan auto $S --character 梦梦 --episode 01 --song more-more-ff5756b3 --name momo-ep1 -o plan.json   # a draft to edit
+pixi run tokimeki plan validate plan.json
+pixi run tokimeki plan refine plan.json                                     # beats exact, missing windows filled
+pixi run tokimeki render plan.json --preview --otio                         # then --final
 ```
 
-Knobs of `mad plan`: `--start/--end` (excerpt, song seconds), `--beats chorus=2` (beats per slot for a section), `--boost blush=2` (favour an expression), `--min-presence 0.5` (how much of a shot she must be in), `--episode` (which episodes), `--guidance "…"` and `--arranger model:<provider>` (a model arranger, once an API is chosen; `--prompt` writes what it would be sent). Editing `plan.json` by hand and running `mad render` again also works: clear a clip's `source_start` to have it placed again.
+The context lists the song (sections, beats, lyrics, suggested slots) and every candidate scene of the character: its lines with times, and per shot the time range, framing, how much of it she is in, her face size, her cutest moments with WD14 expression tags, and the path of a keyframe to look at. A plan may leave `in`/`out` out; render fills them as `plan refine` would. Outputs go to `<series>/.tokimeki/mads/<name>/`.
 
 ## Layout and data
 
@@ -78,34 +84,37 @@ Knobs of `mad plan`: `--start/--end` (excerpt, song seconds), `--beats chorus=2`
     .tokimeki/
       library.db                      # the series library (SQLite)
       cache/frames/<episode id>/      # sampled frames as JPEG; regenerable, safe to delete
-      songs/<song>/analysis.json      # beats, bars, sections of a song
       cache/clips/<hash>.mp4          # rendered clips, reused while their parameters stay the same
       mads/<name>/                    # plan.json, preview.mp4, final.mp4, timeline.otio, report.html
       report/index.html               # the static review page and its images
   ```
+- Song analyses are shared by every series: `$TOKIMEKI_HOME/songs/<id>/analysis.json` (default `~/.local/share/tokimeki/songs`).
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.
 
 ## Code layout
 
-Dependencies point one way: `cli` → `stages` / `report` → `models`, `media`, `library`.
+Dependencies point one way: `cli` → `api` → `mad` → `stages`, `song` → `models`, `media`, `library` (and `report` → `library`, `media`). A test fails if a lower layer imports a higher one.
 
 ```
 src/tokimeki/
   cli.py        the `tokimeki` command
+  api.py        the agent-facing API: JSON in and out (the CLI prints it; an MCP server can wrap it)
   paths.py      where a series keeps its library, cache and report
   library/      SQLite: schema and migrations, typed records, queries
-  media/        ffprobe, NVDEC decoding and frame extraction, frame sampling
+  media/        ffprobe, NVDEC decoding and frame extraction, audio, subtitles, cue sheets
   models/       the only place third-party models and untyped libraries are touched:
                 typed wrappers, GPU lifecycle (one model at a time), no CPU fallback
-  stages/       pipeline stages (shots, content filter, cast); each idempotent and resumable
-  report/       the static HTML report
+  stages/       pipeline stages (shots, content filter, cast, lines, scenes); idempotent, resumable
+  song/         song analysis: beats, bars, vocal line, sections, excerpt, slots, lyrics
+  mad/          edit plans: context, schema, validation, refinement, draft arranger, render, report
+  report/       the static HTML report of a series
 ```
 
 ## Hardware and cost
 
 - Local: an RTX 3070 Ti Laptop GPU (8 GB). Shot detection, face detection, CCIP, WD14, beat analysis, Demucs and Whisper all fit; run one model at a time. NVDEC/NVENC for decoding and encoding.
 - Measured on S1E01 (23:42, 1080p HEVC 10-bit): 19 min for shots, filter and cast, with the CPU fully loaded by other work and the GPU thermally throttled (SM clock ~220 MHz of 1635 during WD14 and CCIP). Roughly 3 min decoding, 8 min WD14, 6 min faces and CCIP; peak GPU memory 5 GB including the desktop.
-- Cloud: only per-scene understanding (cheap model) and arrangement (a strong model, a few rounds per MAD). Batch scoring goes through an API, not chat sessions.
+- Cloud: only per-scene understanding (cheap model) and arrangement (an agent driving `tokimeki plan …`, a few rounds per MAD). Batch scoring goes through an API, not chat sessions.
 
 ## Models
 

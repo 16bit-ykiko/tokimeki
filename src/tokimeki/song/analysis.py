@@ -1,13 +1,20 @@
-"""Analysing a song once: beats and bars (Beat This! on the GPU), vocal line, sections.
+"""Analysing any song once: beats and bars (Beat This! on the GPU), vocal line, sections,
+an excerpt and the slots it suggests.
 
-Results are cached as JSON per song under `.tokimeki/songs/`, so a MAD can be re-planned
-without touching the GPU again.
+A song is an audio file (a track of a `.cue` image is a convenience). The vocal line, which
+places the intro, the sung sections and the outro, comes from an LRC lyrics file or an
+instrumental version when one is given; without either, sections rest on how the music
+changes and how loud it is. Analyses live in a song store shared by every series
+(`$TOKIMEKI_HOME/songs`, by default `~/.local/share/tokimeki/songs`), one per song id.
 """
 
+import hashlib
 import json
+import os
 import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
@@ -18,104 +25,174 @@ from tokimeki.media.audio import decode_audio
 from tokimeki.media.cue import read_cue
 from tokimeki.models.beats import FPS, SAMPLE_RATE, BeatTracker, mel_centres
 from tokimeki.models.gpu import loaded
-from tokimeki.paths import SeriesPaths
 from tokimeki.song import structure
+from tokimeki.song.lyrics import LyricLine, read_lrc
+from tokimeki.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
 from tokimeki.song.structure import Section
 
-ANALYSIS_VERSION = 1
+ANALYSIS_VERSION = 2
+UNLIMITED = 1_000_000
 _INSTRUMENTAL = re.compile(r"\((instrumental|off vocal|karaoke)\)\s*$", re.IGNORECASE)
+
+type Json = dict[str, object]
+
+
+class SongError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
-class Song:
-    """One song: a stretch of an audio file (a whole file, or a track of a CD image)."""
+class SongSource:
+    """Where the song's audio is: a whole file, or a stretch of one (a CD image track)."""
 
-    id: str
-    title: str
     path: Path
     offset: float
     duration: float
+    title: str
+    track: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class SongAnalysis:
-    song: Song
+    id: str
+    title: str
+    source: SongSource
     bpm: float
     beats: list[float]
     bars: list[float]
-    vocal: list[float]
-    loudness: list[float]
+    energy: list[float]
+    """Loudness per bar."""
+    vocal: list[float] | None
+    """Share of each bar that is sung; None when no vocal line was available."""
+    vocal_source: str
+    """"lyrics", "instrumental" or "none"."""
     sections: list[Section]
-    has_vocal_line: bool
+    lyrics: list[LyricLine]
+    excerpt: tuple[float, float] = (0.0, 0.0)
+    slots: list[Slot] = field(default_factory=list[Slot])
+    inputs: dict[str, str] = field(default_factory=dict[str, str])
+    """What the beats and sections were computed from, to know when to redo them."""
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["song"]["path"] = str(self.song.path)
+        data["source"]["path"] = str(self.source.path)
         data["version"] = ANALYSIS_VERSION
         return json.dumps(data, ensure_ascii=False, indent=1)
 
     @staticmethod
     def from_json(text: str) -> "SongAnalysis":
-        data = cast(dict[str, object], json.loads(text))
-        song = cast(dict[str, object], data["song"])
-        sections = cast(list[dict[str, object]], data["sections"])
+        d = cast(Json, json.loads(text))
+        if d.get("version") != ANALYSIS_VERSION:
+            raise SongError("the stored analysis is from another version")
+        src = cast(Json, d["source"])
+        excerpt = cast(list[float], d["excerpt"])
         return SongAnalysis(
-            Song(
-                str(song["id"]),
-                str(song["title"]),
-                Path(str(song["path"])),
-                float(cast(float, song["offset"])),
-                float(cast(float, song["duration"])),
+            id=str(d["id"]),
+            title=str(d["title"]),
+            source=SongSource(
+                Path(str(src["path"])),
+                _float(src["offset"]),
+                _float(src["duration"]),
+                str(src["title"]),
+                cast(int | None, src.get("track")),
             ),
-            float(cast(float, data["bpm"])),
-            cast(list[float], data["beats"]),
-            cast(list[float], data["bars"]),
-            cast(list[float], data["vocal"]),
-            cast(list[float], data["loudness"]),
-            [
-                Section(
-                    str(s["label"]),
-                    int(cast(int, s["group"])),
-                    int(cast(int, s["first_bar"])),
-                    int(cast(int, s["end_bar"])),
-                    float(cast(float, s["start"])),
-                    float(cast(float, s["end"])),
-                    float(cast(float, s["vocal"])),
-                    float(cast(float, s["loudness"])),
-                )
-                for s in sections
-            ],
-            bool(data["has_vocal_line"]),
+            bpm=_float(d["bpm"]),
+            beats=cast(list[float], d["beats"]),
+            bars=cast(list[float], d["bars"]),
+            energy=cast(list[float], d["energy"]),
+            vocal=cast(list[float] | None, d["vocal"]),
+            vocal_source=str(d["vocal_source"]),
+            sections=[_section(cast(Json, s)) for s in cast(list[object], d["sections"])],
+            lyrics=[_lyric(cast(Json, x)) for x in cast(list[object], d["lyrics"])],
+            excerpt=(float(excerpt[0]), float(excerpt[1])),
+            slots=[_slot(cast(Json, x)) for x in cast(list[object], d["slots"])],
+            inputs=cast(dict[str, str], d.get("inputs", {})),
         )
 
 
-def _duration(path: Path) -> float:
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        capture_output=True,
-        text=True,
-        check=True,
+def _float(value: object) -> float:
+    return float(cast(float, value))
+
+
+def _int(value: object) -> int:
+    return int(cast(int, value))
+
+
+def _section(d: Json) -> Section:
+    return Section(
+        str(d["label"]),
+        _int(d["group"]),
+        _int(d["first_bar"]),
+        _int(d["end_bar"]),
+        _float(d["start"]),
+        _float(d["end"]),
+        _float(d["vocal"]),
+        _float(d["loudness"]),
     )
-    return float(result.stdout.strip())
 
 
-def find_song(path: Path, track: int | None = None) -> tuple[Song, Song | None]:
-    """The song at `path` (a CUE track or an audio file) and its instrumental version, if the
-    CD has one (a track titled "<title> (Instrumental)")."""
+def _lyric(d: Json) -> LyricLine:
+    return LyricLine(_float(d["start"]), _float(d["end"]), str(d["text"]))
+
+
+def _slot(d: Json) -> Slot:
+    return Slot(
+        _int(d["index"]), _float(d["start"]), _float(d["end"]), str(d["section"]), _int(d["beats"])
+    )
+
+
+def store() -> Path:
+    home = os.environ.get("TOKIMEKI_HOME")
+    base = Path(home) if home else Path.home() / ".local" / "share" / "tokimeki"
+    return base / "songs"
+
+
+def analysis_path(song_id: str) -> Path:
+    return store() / song_id / "analysis.json"
+
+
+def load_analysis(song_id: str) -> SongAnalysis:
+    path = analysis_path(song_id)
+    if not path.exists():
+        known = sorted(p.name for p in store().glob("*") if (p / "analysis.json").exists())
+        raise SongError(f"no song {song_id!r}; analysed songs: {', '.join(known) or 'none'}")
+    return SongAnalysis.from_json(path.read_text(encoding="utf-8"))
+
+
+def _probe(path: Path) -> tuple[float, str]:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=title",
+         "-of", "json", str(path)],
+        capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    if result.returncode != 0:
+        raise SongError(f"cannot read {path}: {result.stderr.strip()}")
+    fmt = cast(Json, cast(Json, json.loads(result.stdout)).get("format", {}))
+    tags = cast(dict[str, str], fmt.get("tags", {}))
+    title = next((v for k, v in tags.items() if k.lower() == "title"), "")
+    return float(str(fmt.get("duration", "0"))), title
+
+
+def resolve(path: Path, track: int | None = None) -> tuple[SongSource, SongSource | None]:
+    """The song at `path`, and the CD image's instrumental of it when `path` is a `.cue`
+    whose sheet has a track titled "<title> (Instrumental)"."""
+    if not path.exists():
+        raise SongError(f"{path} does not exist")
     if path.suffix.lower() != ".cue":
-        return Song(path.stem, path.stem, path, 0.0, _duration(path)), None
+        duration, title = _probe(path)
+        return SongSource(path, 0.0, duration, title or path.stem), None
     sheet = read_cue(path)
+    total, _ = _probe(sheet.file)
     chosen = sheet.track(track or 1)
-    total = _duration(sheet.file)
 
-    def song(number: int) -> Song:
+    def source(number: int) -> SongSource:
         t = sheet.track(number)
         end = t.end if t.end is not None else total
-        return Song(f"{path.stem}-t{number:02d}", t.title, sheet.file, t.start, end - t.start)
+        return SongSource(sheet.file, t.start, end - t.start, t.title, number)
 
     instrumental = next(
         (
-            song(t.number)
+            source(t.number)
             for t in sheet.tracks
             if t.number != chosen.number
             and _INSTRUMENTAL.search(t.title)
@@ -123,20 +200,48 @@ def find_song(path: Path, track: int | None = None) -> tuple[Song, Song | None]:
         ),
         None,
     )
-    return song(chosen.number), instrumental
+    return source(chosen.number), instrumental
 
 
-def _audio(song: Song) -> NDArray[np.float32]:
-    return decode_audio(song.path, SAMPLE_RATE, start=song.offset, duration=song.duration)
+def song_id(source: SongSource) -> str:
+    """A readable, stable id: the title's ASCII words and a hash of where the audio is."""
+    words = re.findall(r"[a-z0-9]+", source.title.lower())
+    slug = "-".join(words)[:40] or "song"
+    key = f"{source.path.resolve()}|{source.track}|{source.offset:.3f}"
+    return f"{slug}-{hashlib.sha1(key.encode()).hexdigest()[:8]}"
 
 
-def analyse(song: Song, instrumental: Song | None, tracker: BeatTracker) -> SongAnalysis:
-    audio = _audio(song)
+def _audio(source: SongSource) -> NDArray[np.float32]:
+    return decode_audio(source.path, SAMPLE_RATE, start=source.offset, duration=source.duration)
+
+
+def lyrics_share(
+    lyrics: list[LyricLine], bars: NDArray[np.float64], end: float
+) -> NDArray[np.float64]:
+    edges = np.append(bars, end)
+    out: list[float] = []
+    for a, b in pairwise(edges):
+        sung = sum(max(0.0, min(b, x.end) - max(a, x.start)) for x in lyrics)
+        out.append(sung / max(b - a, 1e-9))
+    return np.array(out)
+
+
+def analyse(
+    source: SongSource,
+    tracker: BeatTracker,
+    instrumental: SongSource | None,
+    lyrics: list[LyricLine],
+) -> SongAnalysis:
+    audio = _audio(source)
     beats = tracker.track(audio)
     mix = tracker.spectrogram(audio).astype(np.float64)
     bars = structure.bar_grid(beats.beats, beats.downbeats)
     end = len(audio) / SAMPLE_RATE
-    if instrumental is not None:
+    vocal: NDArray[np.float64] | None = None
+    vocal_source = "none"
+    if lyrics:
+        vocal, vocal_source = lyrics_share(lyrics, bars, end), "lyrics"
+    elif instrumental is not None:
         backing = tracker.spectrogram(_audio(instrumental)).astype(np.float64)
         frames = min(len(mix), len(backing))
         lag = structure.best_lag(mix[:frames].sum(axis=1), backing[:frames].sum(axis=1), 50)
@@ -145,43 +250,92 @@ def analyse(song: Song, instrumental: Song | None, tracker: BeatTracker) -> Song
         centres = mel_centres()
         band = (centres >= low) & (centres <= high)
         share = structure.vocal_share(np.expm1(mix[:frames]) / 1000, np.expm1(backing) / 1000, band)
-        vocal = structure.per_bar(share[:, None], FPS, bars, end)[:, 0]
-    else:
-        vocal = np.ones(len(bars))
+        vocal, vocal_source = (
+            structure.per_bar(share[:, None], FPS, bars, end)[:, 0],
+            "instrumental",
+        )
+    shares = vocal if vocal is not None else np.ones(len(bars))
     loudness = structure.per_bar(mix.mean(axis=1, keepdims=True), FPS, bars, end)[:, 0]
     features = structure.per_bar(mix, FPS, bars, end)
-    starts = structure.boundaries(structure.novelty(features), vocal >= structure.VOCAL_ON)
+    starts = structure.boundaries(structure.novelty(features), shares >= structure.VOCAL_ON)
     sections = structure.merge_runs(
-        structure.label_sections(starts, features, vocal, loudness, bars, end)
+        structure.label_sections(
+            starts, features, shares, loudness, bars, end, vocal_known=vocal is not None
+        )
     )
     intervals = np.diff(beats.beats)
-    bpm = float(60.0 / np.median(intervals)) if len(intervals) else 0.0
     return SongAnalysis(
-        song,
-        bpm,
-        [float(b) for b in beats.beats],
-        [float(b) for b in bars],
-        [float(v) for v in vocal],
-        [float(v) for v in loudness],
-        sections,
-        instrumental is not None,
+        id=song_id(source),
+        title=source.title,
+        source=source,
+        bpm=float(60.0 / np.median(intervals)) if len(intervals) else 0.0,
+        beats=[float(b) for b in beats.beats],
+        bars=[float(b) for b in bars],
+        energy=[float(v) for v in loudness],
+        vocal=None if vocal is None else [float(v) for v in vocal],
+        vocal_source=vocal_source,
+        sections=sections,
+        lyrics=lyrics,
     )
 
 
-def analysis_file(paths: SeriesPaths, song: Song) -> Path:
-    return paths.data_dir / "songs" / song.id / "analysis.json"
+def excerpt_of(analysis: SongAnalysis, span: tuple[float, float] | None) -> Excerpt:
+    if span is None:
+        return first_chorus(analysis.sections)
+    start, end = span
+    if not 0 <= start < end <= analysis.source.duration + 1e-6:
+        raise SongError(
+            f"range {start:.1f}-{end:.1f}s is outside the song (0-{analysis.source.duration:.1f}s)"
+        )
+    return excerpt_between(analysis.bars, analysis.source.duration, analysis.sections, start, end)
 
 
-def analyse_song(paths: SeriesPaths, path: Path, track: int | None = None) -> SongAnalysis:
-    """The cached analysis of a song, computed on first use."""
-    song, instrumental = find_song(path, track)
-    cached = analysis_file(paths, song)
-    if cached.exists():
-        analysis = SongAnalysis.from_json(cached.read_text(encoding="utf-8"))
-        if analysis.song == song:
-            return analysis
-    with loaded("Beat This!", BeatTracker) as tracker:
-        analysis = analyse(song, instrumental, tracker)
-    cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_text(analysis.to_json(), encoding="utf-8")
+def suggested_slots(analysis: SongAnalysis, budget: int = UNLIMITED) -> list[Slot]:
+    """Slots over the stored excerpt: a bar a cut in verses, two beats in the chorus, slowed
+    down section by section until no more than `budget` shots are needed."""
+    start, end = analysis.excerpt
+    excerpt = excerpt_between(
+        analysis.bars, analysis.source.duration, analysis.sections, start, end
+    )
+    return make_slots(analysis.beats, analysis.bpm, excerpt, budget)
+
+
+def analyse_song(
+    path: Path,
+    track: int | None = None,
+    lyrics: Path | None = None,
+    instrumental: Path | None = None,
+    span: tuple[float, float] | None = None,
+) -> SongAnalysis:
+    """Analyse a song (reusing the stored beats and sections when their inputs match), pick
+    its excerpt (`span`, or the top through the first chorus) and store the result."""
+    source, from_cue = resolve(path, track)
+    backing = resolve(instrumental)[0] if instrumental is not None else from_cue
+    inputs = {
+        "lyrics": f"{lyrics.resolve()}@{lyrics.stat().st_mtime_ns}" if lyrics else "",
+        "instrumental": f"{backing.path.resolve()}|{backing.offset:.3f}" if backing else "",
+    }
+    sid = song_id(source)
+    analysis: SongAnalysis | None = None
+    if analysis_path(sid).exists():
+        try:
+            stored = load_analysis(sid)
+            analysis = stored if stored.inputs == inputs and stored.source == source else None
+        except SongError:
+            analysis = None
+    if analysis is None:
+        lines = read_lrc(lyrics) if lyrics is not None else []
+        with loaded("Beat This!", BeatTracker) as tracker:
+            analysis = analyse(source, tracker, backing, lines)
+        analysis = replace(analysis, inputs=inputs)
+    excerpt = excerpt_of(analysis, span)
+    analysis = replace(analysis, excerpt=(excerpt.start, excerpt.end))
+    analysis = replace(analysis, slots=suggested_slots(analysis))
+    save_analysis(analysis)
     return analysis
+
+
+def save_analysis(analysis: SongAnalysis) -> None:
+    out = analysis_path(analysis.id)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(analysis.to_json(), encoding="utf-8")

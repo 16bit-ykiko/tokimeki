@@ -1,4 +1,4 @@
-"""The deterministic arranger: which candidate shot goes in which slot, and why.
+"""The draft arranger: a first plan an agent (or person) starts from and edits.
 
 It follows the README's editing rules where tags can tell: everyday moments in the verse,
 the cutest close-ups in the chorus, an establishing look in the intro, her best smile to
@@ -10,10 +10,9 @@ from dataclasses import dataclass
 from itertools import groupby
 
 from tokimeki.mad.candidates import Candidate
-from tokimeki.mad.plan import MIN_SPEED, Clip, PlanSlot
-
-EDGE = 2 / 24
-"""Seconds kept off each end of a shot, where transitions and stray frames sit."""
+from tokimeki.mad.plan import MIN_SPEED, Plan, SlotPlan
+from tokimeki.mad.refine import usable
+from tokimeki.song.slots import Slot
 
 SMILES = {"smile": 1.0, ":d": 0.9, "^_^": 0.9, "laughing": 0.8, "grin": 0.5}
 
@@ -31,8 +30,9 @@ class Assignment:
     reason: str
 
 
-def fits(candidate: Candidate, slot: PlanSlot) -> bool:
-    return candidate.duration - 2 * EDGE >= slot.duration * MIN_SPEED
+def fits(candidate: Candidate, slot: Slot) -> bool:
+    first, last = usable(candidate)
+    return last - first >= slot.duration * MIN_SPEED
 
 
 def _top_tags(candidate: Candidate, count: int = 3) -> str:
@@ -65,11 +65,21 @@ def score(candidate: Candidate, section: str, closing: bool) -> tuple[float, str
     return 0.5 * cute + 0.5 * c.presence + talking, f"{section}: an everyday moment, {look}"
 
 
-def _alternate(chosen: list[Assignment], slots: dict[int, PlanSlot]) -> list[Assignment]:
-    """Story order within a section, then break up runs of three shots of the same framing."""
-    order = sorted(chosen, key=lambda a: (a.candidate.episode.path, a.candidate.start))
+def _alternate(chosen: list[Assignment], slots: dict[int, Slot]) -> list[Assignment]:
+    """Story order within a section (each slot taking the earliest shot that still fits it),
+    then break up runs of three shots of the same framing."""
     places = sorted(a.slot for a in chosen)
-    picks = [a.candidate for a in order]
+    remaining = [
+        a.candidate
+        for a in sorted(chosen, key=lambda a: (a.candidate.episode.path, a.candidate.start))
+    ]
+    picks: list[Candidate] = []
+    for place in places:
+        pick = next((c for c in remaining if fits(c, slots[place])), None)
+        if pick is None:
+            return chosen
+        remaining.remove(pick)
+        picks.append(pick)
     for i in range(2, len(picks)):
         if picks[i].framing == picks[i - 1].framing == picks[i - 2].framing:
             for j in range(i + 1, len(picks)):
@@ -84,23 +94,36 @@ def _alternate(chosen: list[Assignment], slots: dict[int, PlanSlot]) -> list[Ass
     return [Assignment(p, c, reasons[id(c)]) for p, c in zip(places, picks, strict=True)]
 
 
-def arrange(slots: Sequence[PlanSlot], candidates: Sequence[Candidate]) -> list[Assignment]:
-    """Fill every slot with a different candidate, the most demanding slots first."""
-    if not slots:
-        return []
-    closing = slots[-1].index
-    priority = {"chorus": 0, "pre-chorus": 1, "bridge": 1, "verse": 2, "intro": 3}
-    order = sorted(slots, key=lambda s: (s.index != closing, priority.get(s.section, 2), s.index))
+def _fill(
+    order: Sequence[Slot], candidates: Sequence[Candidate], closing: int
+) -> list[Assignment] | None:
     used: set[int] = set()
     chosen: list[Assignment] = []
     for slot in order:
         options = [c for c in candidates if c.shot.id not in used and fits(c, slot)]
         if not options:
-            raise ArrangementError([f"no unused shot is long enough for slot {slot.index}"])
+            return None
         ranked = [(score(c, slot.section, slot.index == closing), c) for c in options]
         (value, reason), best = max(ranked, key=lambda r: (r[0][0], -r[1].shot.id))
         used.add(best.shot.id)
         chosen.append(Assignment(slot.index, best, f"{reason} (score {value:.2f})"))
+    return chosen
+
+
+def arrange(slots: Sequence[Slot], candidates: Sequence[Candidate]) -> list[Assignment]:
+    """Fill every slot with a different candidate: the most demanding slots first, or, when
+    that leaves a slot no shot can fill, the slots with the fewest shots that fit first."""
+    if not slots:
+        return []
+    closing = slots[-1].index
+    priority = {"chorus": 0, "pre-chorus": 1, "bridge": 1, "verse": 2, "intro": 3}
+    by_priority = sorted(
+        slots, key=lambda s: (s.index != closing, priority.get(s.section, 2), s.index)
+    )
+    by_scarcity = sorted(by_priority, key=lambda s: sum(1 for c in candidates if fits(c, s)))
+    chosen = _fill(by_priority, candidates, closing) or _fill(by_scarcity, candidates, closing)
+    if chosen is None:
+        raise ArrangementError(["not enough shots long enough to fill every slot"])
     by_slot = {s.index: s for s in slots}
     result: list[Assignment] = []
     in_order = sorted(chosen, key=lambda a: a.slot)
@@ -110,7 +133,30 @@ def arrange(slots: Sequence[PlanSlot], candidates: Sequence[Candidate]) -> list[
     return sorted(result, key=lambda a: a.slot)
 
 
-def to_clips(assignments: Sequence[Assignment]) -> list[Clip]:
-    return [
-        Clip(a.slot, a.candidate.episode.path, a.candidate.shot.id, a.reason) for a in assignments
-    ]
+def draft(
+    name: str,
+    series: str,
+    character: str,
+    song: str,
+    slots: Sequence[Slot],
+    candidates: Sequence[Candidate],
+) -> Plan:
+    """A plan with every slot filled; windows are left to `refine`."""
+    by_slot = {a.slot: a for a in arrange(slots, candidates)}
+    return Plan(
+        name,
+        series,
+        character,
+        song,
+        [
+            SlotPlan(
+                s.start,
+                s.end,
+                by_slot[s.index].candidate.shot.id,
+                by_slot[s.index].reason,
+                section=s.section,
+                episode=by_slot[s.index].candidate.episode.path,
+            )
+            for s in slots
+        ],
+    )

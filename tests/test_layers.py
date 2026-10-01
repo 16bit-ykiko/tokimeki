@@ -8,13 +8,13 @@ import pytest
 PACKAGE = Path(__file__).parents[1] / "src" / "tokimeki"
 
 FORBIDDEN = {
-    "models": {"library", "stages", "report", "cli", "media"},
-    "media": {"library", "stages", "report", "cli", "models"},
-    "library": {"stages", "report", "cli", "models", "media"},
-    "report": {"stages", "cli", "models"},
-    "stages": {"report", "cli", "song", "mad"},
-    "song": {"library", "stages", "report", "cli", "mad"},
-    "mad": {"report", "cli"},
+    "models": {"library", "stages", "report", "cli", "media", "song", "mad", "api"},
+    "media": {"library", "stages", "report", "cli", "models", "song", "mad", "api"},
+    "library": {"stages", "report", "cli", "models", "media", "song", "mad", "api"},
+    "report": {"stages", "cli", "models", "song", "mad", "api"},
+    "stages": {"report", "cli", "song", "mad", "api"},
+    "song": {"library", "stages", "report", "cli", "mad", "api"},
+    "mad": {"report", "cli", "api"},
 }
 
 

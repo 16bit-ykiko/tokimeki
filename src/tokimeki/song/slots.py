@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 
-from tokimeki.song.analysis import SongAnalysis
 from tokimeki.song.structure import Section
 
 MIN_EXCERPT = 45.0
@@ -44,7 +43,7 @@ class Slot:
     index: int
     start: float
     end: float
-    """Seconds from the start of the excerpt."""
+    """Song seconds."""
     section: str
     beats: int
 
@@ -53,10 +52,9 @@ class Slot:
         return self.end - self.start
 
 
-def first_chorus(analysis: SongAnalysis) -> Excerpt:
+def first_chorus(sections: list[Section]) -> Excerpt:
     """From the top of the song through its first chorus, trimmed or extended by whole
     sections to stay within `MIN_EXCERPT` to `MAX_EXCERPT` seconds when possible."""
-    sections = analysis.sections
     last = next((i for i, s in enumerate(sections) if s.label == "chorus"), len(sections) - 1)
     first = 0
     while first < last and sections[last].end - sections[first].start > MAX_EXCERPT:
@@ -86,9 +84,11 @@ def _beat_slots(
     return [(a, b, per_slot) for a, b in merged]
 
 
-def excerpt_between(analysis: SongAnalysis, start: float, end: float) -> Excerpt:
+def excerpt_between(
+    bars: list[float], duration: float, sections: list[Section], start: float, end: float
+) -> Excerpt:
     """The stretch `start`-`end` (song seconds), snapped to the nearest bar lines."""
-    edges = [*analysis.bars, analysis.song.duration]
+    edges = [*bars, duration]
     first = min(edges, key=lambda b: abs(b - start))
     last = min(edges, key=lambda b: abs(b - end))
     if last <= first:
@@ -104,14 +104,15 @@ def excerpt_between(analysis: SongAnalysis, start: float, end: float) -> Excerpt
             s.vocal,
             s.loudness,
         )
-        for s in analysis.sections
+        for s in sections
         if s.end > first and s.start < last
     ]
     return Excerpt(first, last, sections)
 
 
 def make_slots(
-    analysis: SongAnalysis,
+    beats: list[float],
+    bpm: float,
     excerpt: Excerpt,
     budget: int,
     fixed: Mapping[str, int] | None = None,
@@ -130,15 +131,12 @@ def make_slots(
             per_slot = fixed.get(
                 section.label, ladder[min(level.get(section.label, 0), len(ladder) - 1)]
             )
-            for a, b, n in _beat_slots(analysis.beats, section.start, section.end, per_slot):
+            for a, b, n in _beat_slots(beats, section.start, section.end, per_slot):
                 spans.append((a, b, n, section.label))
-        return [
-            Slot(i, a - excerpt.start, b - excerpt.start, label, n)
-            for i, (a, b, n, label) in enumerate(spans)
-        ]
+        return [Slot(i, a, b, label, n) for i, (a, b, n, label) in enumerate(spans)]
 
     present = {s.label for s in excerpt.sections}
-    beat = 60.0 / analysis.bpm if analysis.bpm > 0 else 0.5
+    beat = 60.0 / bpm if bpm > 0 else 0.5
 
     def can_slow(label: str) -> bool:
         ladder = DENSITY[label]

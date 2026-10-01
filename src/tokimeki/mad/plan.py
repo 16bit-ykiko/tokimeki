@@ -1,186 +1,254 @@
-"""The edit plan: the single source of truth for one MAD, stored as JSON.
+"""The edit plan: the single source of truth for one MAD, a JSON file an agent writes.
 
-Arrangement fills the clips (which shot goes in which slot, and why); cut placement fills
-each clip's source window and speed; rendering only reads the plan. Editing the JSON by
-hand and rendering again re-renders only the clips that changed.
+One entry per slot of the song: which shot fills it, the source window (`in`/`out`, episode
+seconds) and why. Rendering only reads the plan. `in`/`out`/`speed` may be left out;
+`tokimeki plan refine` (or render) fills them around the shot's expression peak.
 """
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
-PLAN_VERSION = 1
+PLAN_SCHEMA = "tokimeki.plan/2"
 MIN_SPEED = 0.9
 MAX_SPEED = 1.1
+DEFAULT_FPS = "24000/1001"
+
+type Json = dict[str, object]
+
+
+class PlanFormatError(ValueError):
+    def __init__(self, problems: list[str]) -> None:
+        super().__init__("; ".join(problems))
+        self.problems = problems
 
 
 @dataclass
-class Preferences:
-    """What the MAD was asked to be; the knobs a request in plain words turns."""
-
-    character: str
-    song: str
-    track: int | None = None
-    excerpt: tuple[float, float] | None = None
-    """Song seconds; None picks the top of the song through the first chorus."""
-    beats_per_slot: dict[str, int] = field(default_factory=dict[str, int])
-    """Per section kind ("chorus": 2 …); unset kinds slow down only as far as the shots require."""
-    boost: dict[str, float] = field(default_factory=dict[str, float])
-    """Multipliers on expression tags ("blush": 2.0 favours blushing shots)."""
-    min_presence: float = 0.34
-    guidance: str = ""
-    """Free text for a model arranger."""
-
-
-@dataclass
-class SongRef:
-    id: str
-    title: str
-    path: str
-    offset: float
+class SlotPlan:
     start: float
     end: float
-    bpm: float
-
-    @property
-    def duration(self) -> float:
-        return self.end - self.start
-
-
-@dataclass
-class PlanSlot:
-    index: int
-    start: float
-    end: float
-    section: str
-    beats: int
-
-    @property
-    def duration(self) -> float:
-        return self.end - self.start
-
-
-@dataclass
-class Clip:
-    slot: int
-    episode: str
-    shot: int
-    reason: str
-    source_start: float | None = None
-    """Episode seconds where the clip starts; set by cut placement."""
+    """Song seconds, on beats."""
+    shot: int | None
+    why: str = ""
+    source_in: float | None = None
+    source_out: float | None = None
+    """Episode seconds of the stretch shown; it plays at (out - in) / (end - start) speed."""
     speed: float | None = None
-    """Playback speed: the clip shows `slot duration * speed` seconds of the source."""
-    peak: float | None = None
-    """Episode second of the expression peak the window is built around."""
+    section: str = ""
+    episode: str = ""
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+    @property
+    def derived_speed(self) -> float | None:
+        if self.source_in is None or self.source_out is None or self.duration <= 0:
+            return None
+        return (self.source_out - self.source_in) / self.duration
 
 
 @dataclass
 class Plan:
     name: str
-    preferences: Preferences
-    song: SongRef
-    slots: list[PlanSlot]
-    clips: list[Clip]
-    arranger: str
-    fps_num: int = 24000
-    fps_den: int = 1001
-    version: int = PLAN_VERSION
+    series: str
+    character: str
+    song: str
+    slots: list[SlotPlan] = field(default_factory=list[SlotPlan])
+    fps: str = DEFAULT_FPS
 
     @property
-    def fps(self) -> Fraction:
-        return Fraction(self.fps_num, self.fps_den)
+    def frame_rate(self) -> Fraction:
+        return Fraction(self.fps)
 
-    def clip_for(self, slot: int) -> Clip:
-        return next(c for c in self.clips if c.slot == slot)
+    @property
+    def start(self) -> float:
+        return self.slots[0].start if self.slots else 0.0
+
+    @property
+    def end(self) -> float:
+        return self.slots[-1].end if self.slots else 0.0
+
+    def to_dict(self) -> Json:
+        def slot(s: SlotPlan) -> Json:
+            out: Json = {"start": round(s.start, 4), "end": round(s.end, 4), "shot": s.shot}
+            if s.source_in is not None:
+                out["in"] = round(s.source_in, 4)
+            if s.source_out is not None:
+                out["out"] = round(s.source_out, 4)
+            if s.speed is not None:
+                out["speed"] = round(s.speed, 4)
+            out["why"] = s.why
+            if s.section:
+                out["section"] = s.section
+            if s.episode:
+                out["episode"] = s.episode
+            return out
+
+        return {
+            "schema": PLAN_SCHEMA,
+            "name": self.name,
+            "series": self.series,
+            "character": self.character,
+            "song": self.song,
+            "fps": self.fps,
+            "slots": [slot(s) for s in self.slots],
+        }
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False, indent=1)
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=1)
+
+    @staticmethod
+    def from_dict(data: object) -> "Plan":
+        """Parse a plan, collecting every format problem (with its JSON path) at once."""
+        problems: list[str] = []
+        if not isinstance(data, dict):
+            raise PlanFormatError(["the plan must be a JSON object"])
+        d = cast(Json, data)
+
+        def text(obj: Json, key: str, where: str, default: str | None = None) -> str:
+            value = obj.get(key, default)
+            if not isinstance(value, str):
+                problems.append(f"{where}{key}: expected a string")
+                return ""
+            return value
+
+        def number(obj: Json, key: str, where: str, optional: bool = False) -> float | None:
+            value = obj.get(key)
+            if value is None and optional:
+                return None
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                problems.append(f"{where}{key}: expected a number")
+                return None
+            return float(value)
+
+        if d.get("schema", PLAN_SCHEMA) != PLAN_SCHEMA:
+            problems.append(f"schema: expected {PLAN_SCHEMA!r}")
+        plan = Plan(
+            name=text(d, "name", ""),
+            series=text(d, "series", ""),
+            character=text(d, "character", ""),
+            song=text(d, "song", ""),
+            fps=text(d, "fps", "", DEFAULT_FPS),
+        )
+        try:
+            Fraction(plan.fps)
+        except (ValueError, ZeroDivisionError):
+            problems.append("fps: expected a rate such as 24000/1001")
+        raw_slots = d.get("slots")
+        if not isinstance(raw_slots, list):
+            problems.append("slots: expected a list")
+            raw_slots = []
+        for i, raw in enumerate(cast(list[object], raw_slots)):
+            where = f"slots[{i}]."
+            if not isinstance(raw, dict):
+                problems.append(f"slots[{i}]: expected an object")
+                continue
+            s = cast(Json, raw)
+            shot = s.get("shot")
+            if shot is not None and (isinstance(shot, bool) or not isinstance(shot, int)):
+                problems.append(f"{where}shot: expected a shot id (integer)")
+                shot = None
+            plan.slots.append(
+                SlotPlan(
+                    start=number(s, "start", where) or 0.0,
+                    end=number(s, "end", where) or 0.0,
+                    shot=shot,
+                    why=text(s, "why", where, ""),
+                    source_in=number(s, "in", where, optional=True),
+                    source_out=number(s, "out", where, optional=True),
+                    speed=number(s, "speed", where, optional=True),
+                    section=text(s, "section", where, ""),
+                    episode=text(s, "episode", where, ""),
+                )
+            )
+        if problems:
+            raise PlanFormatError(problems)
+        return plan
 
     @staticmethod
     def from_json(text: str) -> "Plan":
-        d = cast(dict[str, object], json.loads(text))
-        p = cast(dict[str, object], d["preferences"])
-        excerpt = cast(list[float] | None, p.get("excerpt"))
-        song = cast(dict[str, object], d["song"])
-        return Plan(
-            name=str(d["name"]),
-            preferences=Preferences(
-                character=str(p["character"]),
-                song=str(p["song"]),
-                track=cast(int | None, p.get("track")),
-                excerpt=(float(excerpt[0]), float(excerpt[1])) if excerpt else None,
-                beats_per_slot=cast(dict[str, int], p.get("beats_per_slot", {})),
-                boost=cast(dict[str, float], p.get("boost", {})),
-                min_presence=float(cast(float, p.get("min_presence", 0.34))),
-                guidance=str(p.get("guidance", "")),
-            ),
-            song=SongRef(
-                str(song["id"]),
-                str(song["title"]),
-                str(song["path"]),
-                float(cast(float, song["offset"])),
-                float(cast(float, song["start"])),
-                float(cast(float, song["end"])),
-                float(cast(float, song["bpm"])),
-            ),
-            slots=[
-                PlanSlot(
-                    int(cast(int, s["index"])),
-                    float(cast(float, s["start"])),
-                    float(cast(float, s["end"])),
-                    str(s["section"]),
-                    int(cast(int, s["beats"])),
-                )
-                for s in cast(list[dict[str, object]], d["slots"])
-            ],
-            clips=[
-                Clip(
-                    int(cast(int, c["slot"])),
-                    str(c["episode"]),
-                    int(cast(int, c["shot"])),
-                    str(c["reason"]),
-                    cast(float | None, c.get("source_start")),
-                    cast(float | None, c.get("speed")),
-                    cast(float | None, c.get("peak")),
-                )
-                for c in cast(list[dict[str, object]], d["clips"])
-            ],
-            arranger=str(d["arranger"]),
-            fps_num=int(cast(int, d.get("fps_num", 24000))),
-            fps_den=int(cast(int, d.get("fps_den", 1001))),
-            version=int(cast(int, d.get("version", PLAN_VERSION))),
-        )
+        try:
+            data = cast(object, json.loads(text))
+        except json.JSONDecodeError as error:
+            raise PlanFormatError([f"not valid JSON: {error}"]) from error
+        return Plan.from_dict(data)
 
 
-def problems(plan: Plan) -> list[str]:
-    """What is wrong with a plan on its own terms (the library is checked elsewhere)."""
-    found: list[str] = []
-    slot_ids = [s.index for s in plan.slots]
-    if slot_ids != list(range(len(plan.slots))):
-        found.append("slots must be numbered 0, 1, 2 … in order")
-    for a, b in zip(plan.slots, plan.slots[1:], strict=False):
-        if abs(a.end - b.start) > 1e-6:
-            found.append(f"slot {b.index} does not start where slot {a.index} ends")
-    covered = [c.slot for c in plan.clips]
-    for index in slot_ids:
-        if covered.count(index) != 1:
-            found.append(f"slot {index} has {covered.count(index)} clips, not 1")
-    unknown = set(covered) - set(slot_ids)
-    if unknown:
-        found.append(f"clips for slots that do not exist: {sorted(unknown)}")
-    shots = [(c.episode, c.shot) for c in plan.clips]
-    repeated = {s for s in shots if shots.count(s) > 1}
-    if repeated:
-        found.append(f"shots used more than once: {sorted(s[1] for s in repeated)}")
-    for clip in plan.clips:
-        if clip.speed is not None and not MIN_SPEED - 1e-9 <= clip.speed <= MAX_SPEED + 1e-9:
-            found.append(
-                f"slot {clip.slot}: speed {clip.speed:.3f} outside {MIN_SPEED}-{MAX_SPEED}"
-            )
-    return found
+def read_plan(path: Path) -> Plan:
+    return Plan.from_json(path.read_text(encoding="utf-8"))
 
 
-def plan_dir(data_dir: Path, name: str) -> Path:
-    return data_dir / "mads" / name
+def write_plan(plan: Plan, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(plan.to_json(), encoding="utf-8")
+
+
+def mad_dir(series: Path, name: str) -> Path:
+    return series / ".tokimeki" / "mads" / name
+
+
+PLAN_JSON_SCHEMA: Json = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": PLAN_SCHEMA,
+    "title": "tokimeki edit plan",
+    "description": "One MAD: which shot fills each slot of a song excerpt, which stretch of "
+    "it is shown, and why. Times in seconds. Check with `tokimeki plan validate`.",
+    "type": "object",
+    "required": ["name", "series", "character", "song", "slots"],
+    "properties": {
+        "schema": {"const": PLAN_SCHEMA},
+        "name": {"type": "string", "description": "Outputs go to <series>/.tokimeki/mads/<name>/."},
+        "series": {"type": "string", "description": "The series directory (absolute path)."},
+        "character": {"type": "string", "description": "Named cast cluster featured, e.g. 梦梦."},
+        "song": {"type": "string", "description": "Song id from `tokimeki song analyze`."},
+        "fps": {"type": "string", "default": DEFAULT_FPS, "description": "Output frame rate."},
+        "slots": {
+            "type": "array",
+            "minItems": 1,
+            "description": "In order, back to back: each starts where the previous ends. The "
+            "first start and last end are the excerpt. Boundaries sit on beats.",
+            "items": {
+                "type": "object",
+                "required": ["start", "end", "shot"],
+                "properties": {
+                    "start": {"type": "number", "description": "Song seconds, on a beat."},
+                    "end": {"type": "number", "description": "Song seconds, on a beat."},
+                    "shot": {
+                        "type": "integer",
+                        "description": "Shot id from the context; kept shots only, each used once.",
+                    },
+                    "in": {
+                        "type": "number",
+                        "description": "Episode seconds where the clip starts, inside the shot;"
+                        " optional, refine fills it.",
+                    },
+                    "out": {
+                        "type": "number",
+                        "description": "Episode seconds where the clip ends; inside the shot.",
+                    },
+                    "speed": {
+                        "type": "number",
+                        "minimum": MIN_SPEED,
+                        "maximum": MAX_SPEED,
+                        "description": "(out - in) / (end - start); optional, derived from in/out.",
+                    },
+                    "why": {
+                        "type": "string",
+                        "description": "One short sentence: why this shot here.",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Informational: the song section.",
+                    },
+                    "episode": {
+                        "type": "string",
+                        "description": "Informational: the shot's episode.",
+                    },
+                },
+            },
+        },
+    },
+}

@@ -11,9 +11,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from tokimeki.mad.plan import Clip, Plan, PlanSlot
+from tokimeki.mad.plan import Plan, SlotPlan
 from tokimeki.media.decode import DecodeError
+from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.paths import SeriesPaths
+from tokimeki.song.analysis import SongAnalysis
 
 RENDER_VERSION = 1
 AUDIO_FADE = 0.5
@@ -33,21 +35,22 @@ PREVIEW = RenderSettings("preview", 640, 360, 28, "p4")
 FINAL = RenderSettings("final", 1920, 1080, 19, "p6")
 
 
-def slot_frames(plan: Plan, slot: PlanSlot) -> int:
-    """Output frames for a slot, so cuts land on the frame nearest each beat."""
-    fps = plan.fps
-    return round(slot.end * fps) - round(slot.start * fps)
+def slot_frames(plan: Plan, slot: SlotPlan) -> int:
+    """Output frames for a slot, counted from the excerpt start, so each cut lands on the
+    frame nearest its beat."""
+    fps = plan.frame_rate
+    return round((slot.end - plan.start) * fps) - round((slot.start - plan.start) * fps)
 
 
-def clip_key(source: Path, clip: Clip, frames: int, settings: RenderSettings, fps: str) -> str:
+def clip_key(source: Path, clip: SlotPlan, frames: int, settings: RenderSettings, fps: str) -> str:
     stat = source.stat()
     data = {
         "version": RENDER_VERSION,
         "source": str(source),
         "size": stat.st_size,
         "mtime": int(stat.st_mtime),
-        "start": clip.source_start,
-        "speed": clip.speed,
+        "start": clip.source_in,
+        "speed": clip.derived_speed,
         "frames": frames,
         "fps": fps,
         "settings": [settings.width, settings.height, settings.quality, settings.preset],
@@ -66,14 +69,15 @@ def _ffmpeg(args: list[str], what: str) -> None:
 
 
 def render_clip(
-    source: Path, clip: Clip, frames: int, settings: RenderSettings, fps: str, out: Path
+    source: Path, clip: SlotPlan, frames: int, settings: RenderSettings, fps: str, out: Path
 ) -> None:
-    if clip.source_start is None or clip.speed is None:
-        raise ValueError(f"slot {clip.slot} has not been placed")
+    speed = clip.derived_speed
+    if clip.source_in is None or speed is None:
+        raise ValueError(f"the slot at {clip.start:.3f}s has no window; refine the plan")
     chain = ",".join(
         [
             f"scale_cuda=w={settings.width}:h={settings.height}:interp_algo=lanczos:format=nv12",
-            f"setpts=(PTS-STARTPTS)/{clip.speed:.6f}",
+            f"setpts=(PTS-STARTPTS)/{speed:.6f}",
             f"fps={fps}",
         ]
     )
@@ -83,7 +87,7 @@ def render_clip(
         [
             "-threads", "1", "-filter_threads", "1",
             "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-            "-ss", f"{clip.source_start:.6f}", "-i", str(source),
+            "-ss", f"{clip.source_in:.6f}", "-i", str(source),
             "-map", "0:v:0", "-an", "-sn", "-dn", "-map_chapters", "-1", "-map_metadata", "-1",
             "-vf", chain, "-frames:v", str(frames),
             "-c:v", "h264_nvenc", "-preset", settings.preset, "-rc", "vbr",
@@ -91,37 +95,48 @@ def render_clip(
             "-video_track_timescale", "24000",
             str(partial),
         ],
-        f"rendering slot {clip.slot}",
+        f"rendering the slot at {clip.start:.3f}s",
     )  # fmt: skip
     partial.replace(out)
 
 
-def render(paths: SeriesPaths, plan: Plan, out_dir: Path, settings: RenderSettings) -> Path:
-    """Render every clip (reusing cached ones), join them and lay the song under them."""
-    fps = f"{plan.fps_num}/{plan.fps_den}"
+def render(
+    paths: SeriesPaths,
+    plan: Plan,
+    episodes: dict[int, str],
+    song: SongAnalysis,
+    out_dir: Path,
+    settings: RenderSettings,
+) -> Path:
+    """Render every clip (reusing cached ones), join them and lay the song under them.
+
+    `episodes` maps each slot's shot id to its episode path.
+    """
+    fps = plan.fps
     clips_dir = paths.cache / "clips"
     rendered: list[Path] = []
-    for clip in sorted(plan.clips, key=lambda c: c.slot):
-        source = paths.episode_file(clip.episode)
-        frames = slot_frames(plan, plan.slots[clip.slot])
-        path = clips_dir / f"{clip_key(source, clip, frames, settings, fps)}.mp4"
+    for slot in plan.slots:
+        if slot.shot is None:
+            raise ValueError(f"the slot at {slot.start:.3f}s has no shot")
+        source = paths.episode_file(episodes[slot.shot])
+        frames = slot_frames(plan, slot)
+        path = clips_dir / f"{clip_key(source, slot, frames, settings, fps)}.mp4"
         if not path.exists():
-            render_clip(source, clip, frames, settings, fps, path)
+            render_clip(source, slot, frames, settings, fps, path)
         rendered.append(path)
     out_dir.mkdir(parents=True, exist_ok=True)
     listing = out_dir / f"{settings.label}.concat.txt"
     listing.write_text("".join(f"file '{p}'\n" for p in rendered), encoding="utf-8")
     video = out_dir / f"{settings.label}.video.mp4"
     _ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video)], "joining")
-    song = plan.song
-    duration = sum(slot_frames(plan, s) for s in plan.slots) / plan.fps
-    fade = f"afade=t=in:d=0.05,afade=t=out:st={float(duration) - AUDIO_FADE:.3f}:d={AUDIO_FADE}"
+    duration = float(sum(slot_frames(plan, s) for s in plan.slots) / plan.frame_rate)
+    fade = f"afade=t=in:d=0.05,afade=t=out:st={duration - AUDIO_FADE:.3f}:d={AUDIO_FADE}"
     final = out_dir / f"{settings.label}.mp4"
     _ffmpeg(
         [
             "-i", str(video),
-            "-ss", f"{song.offset + song.start:.6f}", "-t", f"{float(duration):.6f}",
-            "-i", song.path,
+            "-ss", f"{song.source.offset + plan.start:.6f}", "-t", f"{duration:.6f}",
+            "-i", str(song.source.path),
             "-map", "0:v", "-map", "1:a", "-c:v", "copy",
             "-af", fade, "-c:a", "aac", "-b:a", "256k",
             "-movflags", "+faststart", str(final),
@@ -131,3 +146,23 @@ def render(paths: SeriesPaths, plan: Plan, out_dir: Path, settings: RenderSettin
     video.unlink()
     listing.unlink()
     return final
+
+
+def export_timeline(
+    paths: SeriesPaths, plan: Plan, episodes: dict[int, str], song: SongAnalysis, path: Path
+) -> None:
+    """An OpenTimelineIO timeline of the cuts, for finishing in an editor (e.g. Resolve)."""
+    video = [
+        TimelineClip(
+            f"{i} {slot.section} - shot {slot.shot}",
+            paths.episode_file(episodes[slot.shot]),
+            slot.source_in or 0.0,
+            slot_frames(plan, slot),
+            slot.derived_speed or 1.0,
+        )
+        for i, slot in enumerate(plan.slots)
+        if slot.shot is not None
+    ]
+    total = sum(slot_frames(plan, s) for s in plan.slots)
+    audio = [TimelineClip(song.title, song.source.path, song.source.offset + plan.start, total)]
+    write_timeline(path, plan.name, float(plan.frame_rate), video, audio)
