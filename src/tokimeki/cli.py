@@ -6,6 +6,8 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from tokimeki.mad import make as mad
+from tokimeki.mad.plan import Preferences
 from tokimeki.report import build_report
 from tokimeki.song.analysis import analyse_song
 from tokimeki.song.slots import first_chorus, make_slots
@@ -100,6 +102,49 @@ def cmd_song(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pairs(values: list[str] | None, kind: type[float] | type[int]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for value in values or []:
+        key, _, number = value.partition("=")
+        out[key.strip()] = kind(number)
+    return out
+
+
+def _preferences(args: argparse.Namespace) -> Preferences:
+    song: str = args.song
+    start: float | None = args.start
+    end: float | None = args.end
+    return Preferences(
+        character=str(args.character),
+        song=str(Path(song).expanduser()),
+        track=args.track,
+        excerpt=(start, end) if start is not None and end is not None else None,
+        beats_per_slot={k: int(v) for k, v in _pairs(args.beats, int).items()},
+        boost=_pairs(args.boost, float),
+        min_presence=float(args.min_presence),
+        guidance=str(args.guidance),
+    )
+
+
+def cmd_mad_plan(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    name: str = args.name
+    episodes = register_episodes(ctx)
+    only: list[str] | None = args.episode
+    if only:
+        episodes = [e for e in episodes if any(part in e.path for part in only)]
+    prefs = _preferences(args)
+    if args.prompt:
+        print(f"prompt: {mad.write_prompt(ctx, name, prefs, episodes)}")
+    plan = mad.make_plan(ctx, name, prefs, episodes, str(args.arranger))
+    print(f"plan: {mad.save_plan(ctx, plan)}")
+    for clip in plan.clips:
+        slot = plan.slots[clip.slot]
+        where = f"{slot.index:3} {slot.section:10} {slot.start:6.2f}s"
+        print(f"  {where}  shot {clip.shot:5}  {clip.reason}")
+    return 0
+
+
 def cmd_cast_list(args: argparse.Namespace) -> int:
     ctx = open_series(_series(args))
     for cluster, hints in cast.clusters_with_hints(ctx):
@@ -175,6 +220,25 @@ def build_parser() -> argparse.ArgumentParser:
     song.add_argument("song", help="an audio file, or a .cue sheet of a CD image")
     song.add_argument("--track", type=int, help="track number in the .cue sheet (default 1)")
     song.add_argument("--shots", type=int, default=60, help="how many shots can fill slots")
+
+    mad_parser = sub.add_parser("mad", help="plan and render a MAD")
+    mad_sub = mad_parser.add_subparsers(required=True, metavar="action")
+    plan = mad_sub.add_parser("plan", help="choose the excerpt, slots and shots; write plan.json")
+    plan.set_defaults(handler=cmd_mad_plan)
+    plan.add_argument("series", help="the series directory holding the episodes")
+    plan.add_argument("name", help="the MAD's name (its directory under .tokimeki/mads/)")
+    plan.add_argument("--song", required=True, help="an audio file, or a .cue sheet")
+    plan.add_argument("--track", type=int, help="track number in the .cue sheet")
+    plan.add_argument("--character", default="梦梦", help="the named cast cluster to feature")
+    plan.add_argument("--episode", action="append", help="only episodes containing this")
+    plan.add_argument("--start", type=float, help="excerpt start in song seconds")
+    plan.add_argument("--end", type=float, help="excerpt end in song seconds")
+    plan.add_argument("--beats", action="append", help="beats per slot, e.g. chorus=2")
+    plan.add_argument("--boost", action="append", help="weigh an expression tag, e.g. blush=2")
+    plan.add_argument("--min-presence", type=float, default=0.34, help="share of a shot she is in")
+    plan.add_argument("--guidance", default="", help="free text for a model arranger")
+    plan.add_argument("--arranger", default=mad.HEURISTIC, help="heuristic or model:<provider>")
+    plan.add_argument("--prompt", action="store_true", help="also write the model prompt")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")

@@ -12,8 +12,9 @@ FORBIDDEN = {
     "media": {"library", "stages", "report", "cli", "models"},
     "library": {"stages", "report", "cli", "models", "media"},
     "report": {"stages", "cli", "models"},
-    "stages": {"report", "cli", "song"},
-    "song": {"library", "stages", "report", "cli"},
+    "stages": {"report", "cli", "song", "mad"},
+    "song": {"library", "stages", "report", "cli", "mad"},
+    "mad": {"report", "cli"},
 }
 
 

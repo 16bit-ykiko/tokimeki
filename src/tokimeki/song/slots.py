@@ -1,5 +1,6 @@
 """From a song analysis to an excerpt and the slots a MAD fills, one cut per slot."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -85,15 +86,50 @@ def _beat_slots(
     return [(a, b, per_slot) for a, b in merged]
 
 
-def make_slots(analysis: SongAnalysis, excerpt: Excerpt, budget: int) -> list[Slot]:
-    """Slots on the beat grid, sped up per section kind as far as `budget` shots allow."""
+def excerpt_between(analysis: SongAnalysis, start: float, end: float) -> Excerpt:
+    """The stretch `start`-`end` (song seconds), snapped to the nearest bar lines."""
+    edges = [*analysis.bars, analysis.song.duration]
+    first = min(edges, key=lambda b: abs(b - start))
+    last = min(edges, key=lambda b: abs(b - end))
+    if last <= first:
+        raise ValueError(f"excerpt {start:.1f}-{end:.1f}s is shorter than a bar")
+    sections = [
+        Section(
+            s.label,
+            s.group,
+            s.first_bar,
+            s.end_bar,
+            max(s.start, first),
+            min(s.end, last),
+            s.vocal,
+            s.loudness,
+        )
+        for s in analysis.sections
+        if s.end > first and s.start < last
+    ]
+    return Excerpt(first, last, sections)
+
+
+def make_slots(
+    analysis: SongAnalysis,
+    excerpt: Excerpt,
+    budget: int,
+    fixed: Mapping[str, int] | None = None,
+) -> list[Slot]:
+    """Slots on the beat grid, sped up per section kind as far as `budget` shots allow.
+
+    Section kinds in `fixed` keep that many beats a slot whatever the budget.
+    """
+    fixed = fixed or {}
     level = dict.fromkeys(DENSITY, 0)
 
     def build() -> list[Slot]:
         spans: list[tuple[float, float, int, str]] = []
         for section in excerpt.sections:
             ladder = DENSITY.get(section.label, (4, 8, 16))
-            per_slot = ladder[min(level.get(section.label, 0), len(ladder) - 1)]
+            per_slot = fixed.get(
+                section.label, ladder[min(level.get(section.label, 0), len(ladder) - 1)]
+            )
             for a, b, n in _beat_slots(analysis.beats, section.start, section.end, per_slot):
                 spans.append((a, b, n, section.label))
         return [
@@ -108,6 +144,7 @@ def make_slots(analysis: SongAnalysis, excerpt: Excerpt, budget: int) -> list[Sl
         ladder = DENSITY[label]
         return (
             label in present
+            and label not in fixed
             and level[label] + 1 < len(ladder)
             and ladder[level[label] + 1] * beat <= MAX_SLOT_SECONDS
         )

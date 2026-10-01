@@ -228,3 +228,21 @@ def named_cast_by_shot(
             (name, ShotCast(shot_id, cluster_id, presence, height, area))
         )
     return out
+
+
+def named_face_heights(
+    conn: sqlite3.Connection, episode_id: int, name: str
+) -> dict[int, dict[int, float]]:
+    """Per shot, per sampled frame index: the height of the named character's largest face."""
+    rows: list[tuple[int, int, float]] = conn.execute(
+        "SELECT f.shot_id, f.frame_index, MAX(fa.y1 - fa.y0) FROM faces AS fa"
+        " JOIN clusters AS c ON c.id = fa.cluster_id"
+        " JOIN frames AS f ON f.id = fa.frame_id"
+        " JOIN shots AS s ON s.id = f.shot_id"
+        " WHERE s.episode_id = ? AND c.name = ? GROUP BY f.shot_id, f.frame_index",
+        (episode_id, name),
+    ).fetchall()
+    out: dict[int, dict[int, float]] = {}
+    for shot_id, frame_index, height in rows:
+        out.setdefault(shot_id, {})[frame_index] = height
+    return out
