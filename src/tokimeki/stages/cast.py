@@ -8,7 +8,7 @@ therefore carry over to every later episode.
 import logging
 import sqlite3
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -30,23 +30,18 @@ from tokimeki.library.cast import (
     list_clusters,
     merge_clusters,
     name_cluster,
+    unassign_unnamed,
 )
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.records import Box, Cluster, Episode, Frame, ShotStatus
 from tokimeki.library.shots import list_episode_frames, list_shots
 from tokimeki.media.images import load_image, square_around
-from tokimeki.models.ccip import (
-    CCIP_DBSCAN_EPS,
-    CCIP_DBSCAN_MIN_SAMPLES,
-    CCIP_SAME_THRESHOLD,
-    CcipEncoder,
-    ccip_differences,
-)
+from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.models.gpu import loaded, prefetched
 from tokimeki.stages.base import Context
-from tokimeki.stages.clustering import NOISE, dbscan, evenly_spaced, nearest_cluster
+from tokimeki.stages.clustering import average_linkage, evenly_spaced
 from tokimeki.stages.frames import ensure_frames
 
 NAME = "cast"
@@ -57,10 +52,17 @@ MIN_FACE_HEIGHT = 0.06
 HEAD_CROP_SCALE = 1.8
 """CCIP sees a square this many face-heights wide around the face: hair tells characters apart."""
 
+CLUSTER_THRESHOLD = 0.15
+"""Faces stay in one cluster while their mean CCIP difference is at most this.
+
+CCIP's own same-character threshold is 0.178 (pairwise, best F1). Slightly lower keeps
+look-alikes (the pink-haired Deviluke sisters) apart; a character split over two clusters
+is one `tokimeki cast merge` away, two characters in one cluster are not.
+"""
+
 MIN_CLUSTER_FACES = 4
 MAX_EXEMPLARS = 64
-NEAREST_EXEMPLARS = 3
-SPLIT_EPS_FACTOR = 0.7
+SPLIT_FACTOR = 0.7
 DETECT_LONG_SIDE = 640
 
 log = logging.getLogger("tokimeki")
@@ -174,43 +176,47 @@ def assign_clusters(conn: sqlite3.Connection, episode_id: int) -> int:
     face_ids = [f.face.id for f in episode_faces(conn, episode_id) if f.face.cluster_id is None]
     if not face_ids:
         return 0
+    known = {
+        cluster_id: face_embeddings(conn, evenly_spaced(members, MAX_EXEMPLARS))
+        for cluster_id, members in clustered_face_ids(conn).items()
+    }
     embeddings = face_embeddings(conn, face_ids)
-    labels = np.full(len(face_ids), NOISE, dtype=np.int64)
-    exemplar_ids: list[int] = []
-    exemplar_clusters: list[int] = []
-    for cluster_id, members in clustered_face_ids(conn).items():
-        chosen = evenly_spaced(members, MAX_EXEMPLARS)
-        exemplar_ids += chosen
-        exemplar_clusters += [cluster_id] * len(chosen)
-    if exemplar_ids:
-        distances = ccip_differences(embeddings, face_embeddings(conn, exemplar_ids))
-        labels = nearest_cluster(
-            distances, np.array(exemplar_clusters), CCIP_SAME_THRESHOLD, NEAREST_EXEMPLARS
-        )
-        for cluster_id in np.unique(labels[labels != NOISE]):
-            assign_faces(
-                conn, [face_ids[i] for i in np.flatnonzero(labels == cluster_id)], int(cluster_id)
-            )
-    rest = np.flatnonzero(labels == NOISE)
-    return len(_cluster_new(conn, [face_ids[i] for i in rest], embeddings[rest], CCIP_DBSCAN_EPS))
+    return len(_agglomerate(conn, face_ids, embeddings, CLUSTER_THRESHOLD, known))
 
 
-def _cluster_new(
+def _agglomerate(
     conn: sqlite3.Connection,
     face_ids: Sequence[int],
     embeddings: NDArray[np.float32],
-    eps: float,
+    threshold: float,
+    known: Mapping[int, NDArray[np.float32]],
 ) -> list[int]:
-    if not face_ids:
-        return []
-    labels = dbscan(ccip_differences(embeddings, embeddings), eps, CCIP_DBSCAN_MIN_SAMPLES)
-    groups = [np.flatnonzero(labels == label) for label in np.unique(labels[labels != NOISE])]
-    groups = sorted((g for g in groups if len(g) >= MIN_CLUSTER_FACES), key=len, reverse=True)
+    """Cluster faces together with the existing clusters, each a fixed group of exemplars.
+
+    Faces that end up with an existing cluster join it; other groups of at least
+    `MIN_CLUSTER_FACES` become new clusters. Returns the new cluster ids, largest first.
+    """
+    clusters = list(known)
+    k, n = len(clusters), len(face_ids)
+    distances = np.full((k + n, k + n), np.inf, dtype=np.float32)
+    distances[k:, k:] = ccip_differences(embeddings, embeddings)
+    for j, cluster_id in enumerate(clusters):
+        column = ccip_differences(embeddings, known[cluster_id]).mean(axis=1)
+        distances[k:, j] = column
+        distances[j, k:] = column
+    weights = np.array([len(known[c]) for c in clusters] + [1] * n, dtype=np.float64)
+    labels = average_linkage(distances, threshold, weights)
+    groups = sorted((np.flatnonzero(labels == label) for label in np.unique(labels)), key=len)
     created: list[int] = []
-    for group in groups:
-        cluster_id = create_cluster(conn)
-        assign_faces(conn, [face_ids[int(i)] for i in group], cluster_id)
-        created.append(cluster_id)
+    for members in reversed(groups):
+        anchors = [clusters[int(m)] for m in members if m < k]
+        faces = [face_ids[int(m) - k] for m in members if m >= k]
+        if anchors:
+            assign_faces(conn, faces, anchors[0])
+        elif len(faces) >= MIN_CLUSTER_FACES:
+            cluster_id = create_cluster(conn)
+            assign_faces(conn, faces, cluster_id)
+            created.append(cluster_id)
     return created
 
 
@@ -223,9 +229,8 @@ def split_cluster(conn: sqlite3.Connection, cluster_id: int) -> list[int]:
     get_cluster(conn, cluster_id)
     face_ids = [f.face.id for f in cluster_faces(conn, cluster_id)]
     assign_faces(conn, face_ids, None)
-    created = _cluster_new(
-        conn, face_ids, face_embeddings(conn, face_ids), CCIP_DBSCAN_EPS * SPLIT_EPS_FACTOR
-    )
+    embeddings = face_embeddings(conn, face_ids)
+    created = _agglomerate(conn, face_ids, embeddings, CLUSTER_THRESHOLD * SPLIT_FACTOR, {})
     if created:
         merge_clusters(conn, created[0], cluster_id)
     return created[1:]
@@ -245,6 +250,18 @@ def merge(ctx: Context, sources: Sequence[int], target: int) -> None:
     with transaction(ctx.conn):
         for source in sources:
             merge_clusters(ctx.conn, source, target)
+
+
+def recluster(ctx: Context, episodes: Sequence[Episode]) -> int:
+    """Cluster again every face not in a named cluster, from the stored embeddings (no GPU).
+
+    Named clusters stay as they are and attract matching faces. Returns the new cluster count.
+    """
+    with transaction(ctx.conn):
+        unassign_unnamed(ctx.conn)
+        return sum(
+            assign_clusters(ctx.conn, e.id) for e in episodes if stage_done(ctx.conn, e.id, NAME)
+        )
 
 
 def split(ctx: Context, cluster_id: int) -> list[int]:

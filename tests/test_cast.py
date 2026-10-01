@@ -16,10 +16,10 @@ from tokimeki.library.db import open_library
 from tokimeki.library.records import Box, Rating
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
-from tokimeki.stages import pipeline
+from tokimeki.stages import cast, pipeline
 from tokimeki.stages.base import open_series, register_episodes
 from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, head_box, split_cluster
-from tokimeki.stages.clustering import NOISE, dbscan, evenly_spaced, nearest_cluster
+from tokimeki.stages.clustering import average_linkage, evenly_spaced
 
 
 def test_ccip_difference_is_half_one_minus_cosine() -> None:
@@ -28,16 +28,25 @@ def test_ccip_difference_is_half_one_minus_cosine() -> None:
     assert ccip_differences(a, b).tolist() == [[0.0, 1.0], [0.5, 0.5]]
 
 
-def test_dbscan_separates_groups_and_noise() -> None:
-    points = np.array([0.0, 0.1, 0.2, 5.0, 5.1, 9.0], dtype=np.float32)
+def test_average_linkage_does_not_chain() -> None:
+    points = np.arange(10, dtype=np.float32) * 0.1
     distances = np.abs(points[:, None] - points[None, :])
-    assert dbscan(distances, eps=0.15, min_samples=2).tolist() == [0, 0, 0, 1, 1, NOISE]
+    labels = average_linkage(distances, threshold=0.15)
+    assert len(set(labels.tolist())) > 1
+    pairs = np.array([0.0, 0.05, 5.0, 5.05], dtype=np.float32)
+    distances = np.abs(pairs[:, None] - pairs[None, :])
+    assert average_linkage(distances, threshold=0.15).tolist() == [0, 0, 1, 1]
 
 
-def test_nearest_cluster_uses_k_nearest_exemplars() -> None:
-    distances = np.array([[0.05, 0.3, 0.1, 0.1], [0.5, 0.5, 0.5, 0.5]], dtype=np.float32)
-    clusters = np.array([7, 7, 9, 9])
-    assert nearest_cluster(distances, clusters, threshold=0.15, k=2).tolist() == [9, NOISE]
+def test_average_linkage_keeps_infinite_pairs_apart_and_honours_weights() -> None:
+    distances = np.array([[0, np.inf, 0.1], [np.inf, 0, 0.12], [0.1, 0.12, 0]], dtype=np.float32)
+    labels = average_linkage(distances, threshold=0.15).tolist()
+    assert labels[0] != labels[1]
+    assert labels[2] == labels[0]
+    distances = np.array([[0, 0.12, 0.1], [0.12, 0, 0.17], [0.1, 0.17, 0]], dtype=np.float32)
+    assert average_linkage(distances, 0.15).tolist() == [0, 0, 0]
+    heavy = np.array([1.0, 1.0, 50.0])
+    assert average_linkage(distances, 0.15, heavy).tolist() == [0, 1, 0]
 
 
 def test_evenly_spaced() -> None:
@@ -129,3 +138,18 @@ def test_face_models_run_on_the_gpu() -> None:
         assert encoder.embed([image]).shape == (1, 768)
     finally:
         encoder.close()
+
+
+def test_recluster_keeps_named_clusters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    make_clip(tmp_path / "ep01.mkv", ["color=c=red", "color=c=blue"])
+    fakes.install(monkeypatch)
+    ctx = open_series(tmp_path)
+    episodes = register_episodes(ctx)
+    pipeline.run(ctx, episodes)
+    (cluster,) = cast_db.list_clusters(ctx.conn)
+    assert cast.recluster(ctx, episodes) == 1
+    (renewed,) = cast_db.list_clusters(ctx.conn)
+    assert renewed.id != cluster.id
+    cast.rename(ctx, renewed.id, "Momo")
+    assert cast.recluster(ctx, episodes) == 0
+    assert cast_db.list_clusters(ctx.conn)[0].name == "Momo"

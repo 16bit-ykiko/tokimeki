@@ -85,6 +85,13 @@ def cmd_cast_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cast_recluster(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    created = cast.recluster(ctx, register_episodes(ctx))
+    print(f"{created} clusters besides the named ones")
+    return 0
+
+
 def cmd_cast_split(args: argparse.Namespace) -> int:
     cluster: int = args.cluster
     created = cast.split(open_series(_series(args)), cluster)
@@ -140,6 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
     merge = cast_command("merge", cmd_cast_merge, "move the faces of clusters into another")
     merge.add_argument("source", type=int, nargs="+")
     merge.add_argument("target", type=int)
+    cast_command(
+        "recluster", cmd_cast_recluster, "cluster all faces outside named clusters again (no GPU)"
+    )
     split = cast_command("split", cmd_cast_split, "re-cluster one cluster more tightly")
     split.add_argument("cluster", type=int)
     return parser

@@ -32,13 +32,23 @@ def migrate(conn: sqlite3.Connection) -> None:
         raise SchemaTooNewError(
             f"library schema v{current} is newer than this tokimeki (v{len(MIGRATIONS)})"
         )
-    for version, script in enumerate(MIGRATIONS[current:], start=current + 1):
-        try:
-            conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {version};\nCOMMIT;")
-        except sqlite3.Error:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
-            raise
+    if current == len(MIGRATIONS):
+        return
+    # Rebuilding a table must not fire ON DELETE actions, and the pragma is ignored inside
+    # a transaction, so foreign keys are off for the migration and checked afterwards.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for version, script in enumerate(MIGRATIONS[current:], start=current + 1):
+            try:
+                conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {version};\nCOMMIT;")
+            except sqlite3.Error:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise sqlite3.IntegrityError("foreign key violations after migrating the library")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 @contextmanager

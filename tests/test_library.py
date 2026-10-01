@@ -1,5 +1,6 @@
 import sqlite3
 from fractions import Fraction
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -130,3 +131,22 @@ def test_name_merge_and_cleanup(conn: sqlite3.Connection, episode: Episode) -> N
     assert [c.id for c in cast_db.list_clusters(conn)] == [first]
     cast_db.clear_episode_faces(conn, episode.id)
     assert [c.name for c in cast_db.list_clusters(conn)] == ["Yami"]
+
+
+def test_v1_library_upgrades_without_losing_cluster_links(tmp_path: Path) -> None:
+    path = tmp_path / "library.db"
+    old = sqlite3.connect(path, isolation_level=None)
+    old.executescript(f"BEGIN;\n{MIGRATIONS[0]}\nPRAGMA user_version = 1;\nCOMMIT;")
+    old.execute("PRAGMA foreign_keys = ON")
+    episode = episode_db.register_episode(old, "ep01.mkv", 1280, 720, Fraction(24), 100)
+    _, face_ids = _faces(old, episode)
+    cluster = cast_db.create_cluster(old, "Yami")
+    cast_db.assign_faces(old, face_ids, cluster)
+    old.close()
+
+    conn = open_library(path)
+    assert schema_version(conn) == len(MIGRATIONS)
+    assert cast_db.get_cluster(conn, cluster).face_count == 3
+    removed = cast_db.create_cluster(conn)
+    conn.execute("DELETE FROM clusters WHERE id = ?", (removed,))
+    assert cast_db.create_cluster(conn) > removed

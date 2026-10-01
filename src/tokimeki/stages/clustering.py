@@ -1,62 +1,70 @@
 """Clustering on a precomputed distance matrix; pure numpy, so it is tested without models."""
 
-from collections import deque
-
 import numpy as np
 from numpy.typing import NDArray
 
-NOISE = -1
 
-
-def dbscan(distances: NDArray[np.float32], eps: float, min_samples: int) -> NDArray[np.int64]:
-    """DBSCAN labels (0, 1, … or `NOISE`) for a square distance matrix; a point counts itself."""
-    n = len(distances)
-    labels = np.full(n, NOISE, dtype=np.int64)
-    neighbours = [np.flatnonzero(distances[i] <= eps) for i in range(n)]
-    core = np.array([len(nb) >= min_samples for nb in neighbours], dtype=bool)
-    next_label = 0
-    for seed in range(n):
-        if labels[seed] != NOISE or not core[seed]:
-            continue
-        labels[seed] = next_label
-        queue = deque([seed])
-        while queue:
-            point = queue.popleft()
-            if not core[point]:
-                continue
-            for other in neighbours[point]:
-                if labels[other] == NOISE:
-                    labels[other] = next_label
-                    queue.append(int(other))
-        next_label += 1
-    return labels
-
-
-def nearest_cluster(
+def average_linkage(
     distances: NDArray[np.float32],
-    exemplar_clusters: NDArray[np.int64],
     threshold: float,
-    k: int = 3,
+    weights: NDArray[np.float64] | None = None,
 ) -> NDArray[np.int64]:
-    """For each row, the cluster whose exemplars are closest, or `NOISE` if none is close enough.
+    """Agglomerative clustering with average linkage, cut at `threshold`.
 
-    `distances` is `(faces, exemplars)` and `exemplar_clusters` gives each exemplar's cluster.
-    A cluster's distance to a face is the mean of its `k` nearest exemplars (fewer if the
-    cluster is that small), which keeps a single stray exemplar from pulling faces in.
+    Returns a label per item, numbered by first appearance. Average linkage does not chain
+    the way DBSCAN does: two groups merge only if their faces are close on average, not
+    when one ambiguous face sits between them. Items at an infinite distance never end up
+    in one group. `weights` lets an item stand for a group of that many members.
+
+    Nearest-neighbour chain algorithm: O(n^2) time and memory.
     """
     n = len(distances)
-    out = np.full(n, NOISE, dtype=np.int64)
-    if n == 0 or distances.shape[1] == 0:
-        return out
-    clusters = np.unique(exemplar_clusters)
-    scores = np.empty((n, len(clusters)), dtype=np.float32)
-    for j, cluster in enumerate(clusters):
-        own = np.sort(distances[:, exemplar_clusters == cluster], axis=1)[:, :k]
-        scores[:, j] = own.mean(axis=1)
-    best = scores.argmin(axis=1)
-    close = scores[np.arange(n), best] <= threshold
-    out[close] = clusters[best[close]]
-    return out
+    d = distances.astype(np.float64)
+    np.fill_diagonal(d, np.inf)
+    size = np.ones(n) if weights is None else weights.astype(np.float64)
+    active = np.ones(n, dtype=bool)
+    merges: list[tuple[int, int]] = []
+    chain: list[int] = []
+    remaining = n
+    while remaining > 1:
+        if not chain:
+            chain.append(int(np.flatnonzero(active)[0]))
+        a = chain[-1]
+        row = np.where(active, d[a], np.inf)
+        b = int(row.argmin())
+        if len(chain) > 1 and row[chain[-2]] <= row[b]:
+            b = chain[-2]
+        if not np.isfinite(row[b]):
+            chain.pop()
+            active[a] = False
+            remaining -= 1
+        elif len(chain) > 1 and b == chain[-2]:
+            chain.pop()
+            chain.pop()
+            if row[b] <= threshold:
+                merges.append((a, b))
+            merged = (size[a] * d[a] + size[b] * d[b]) / (size[a] + size[b])
+            d[a], d[:, a] = merged, merged
+            d[a, a] = np.inf
+            d[b], d[:, b] = np.inf, np.inf
+            size[a] += size[b]
+            active[b] = False
+            remaining -= 1
+        else:
+            chain.append(b)
+    root = np.arange(n)
+
+    def find(x: int) -> int:
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = int(root[x])
+        return x
+
+    for a, b in merges:
+        root[find(b)] = find(a)
+    roots = [find(i) for i in range(n)]
+    numbering: dict[int, int] = {}
+    return np.array([numbering.setdefault(r, len(numbering)) for r in roots], dtype=np.int64)
 
 
 def evenly_spaced[T](items: list[T], limit: int) -> list[T]:

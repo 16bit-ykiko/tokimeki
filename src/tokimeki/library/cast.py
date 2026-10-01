@@ -162,6 +162,15 @@ def merge_clusters(conn: sqlite3.Connection, source_id: int, target_id: int) -> 
         conn.execute("UPDATE clusters SET name = ? WHERE id = ?", (source.name, target_id))
 
 
+def unassign_unnamed(conn: sqlite3.Connection) -> None:
+    """Take every face out of the clusters the user has not named, and drop those clusters."""
+    conn.execute(
+        "UPDATE faces SET cluster_id = NULL"
+        " WHERE cluster_id IN (SELECT id FROM clusters WHERE name IS NULL)"
+    )
+    delete_empty_clusters(conn)
+
+
 def delete_empty_clusters(conn: sqlite3.Connection) -> None:
     """Drop clusters with no faces left, unless the user named them."""
     conn.execute(

@@ -98,4 +98,15 @@ WHERE fa.cluster_id IS NOT NULL
 GROUP BY fr.shot_id, fa.cluster_id;
 """
 
-MIGRATIONS: tuple[str, ...] = (V1,)
+# Cluster ids are what the user types to name clusters, so a deleted id is never handed out again.
+V2 = """
+CREATE TABLE clusters_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE
+) STRICT;
+INSERT INTO clusters_v2 (id, name) SELECT id, name FROM clusters;
+DROP TABLE clusters;
+ALTER TABLE clusters_v2 RENAME TO clusters;
+"""
+
+MIGRATIONS: tuple[str, ...] = (V1, V2)

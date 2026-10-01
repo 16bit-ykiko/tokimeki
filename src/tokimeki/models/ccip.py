@@ -47,12 +47,6 @@ class CcipEncoder:
         self._model.close()
 
 
-# From the model's metrics.json and cluster.json on the Hub.
-CCIP_SAME_THRESHOLD = 0.17847511429108218
-CCIP_DBSCAN_EPS = 0.12921094122454668
-CCIP_DBSCAN_MIN_SAMPLES = 2
-
-
 def ccip_differences(a: NDArray[np.float32], b: NDArray[np.float32]) -> NDArray[np.float32]:
     """CCIP difference between every row of `a` and of `b`, in [0, 1]; lower means more alike.
 
