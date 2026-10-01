@@ -9,6 +9,9 @@ import logging
 import time
 from collections.abc import Iterator, Sequence
 
+import numpy as np
+from numpy.typing import NDArray
+
 from tokimeki.library.cast import delete_empty_clusters
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
@@ -23,7 +26,7 @@ from tokimeki.library.shots import (
     status_counts,
 )
 from tokimeki.media.images import load_image
-from tokimeki.models.gpu import loaded
+from tokimeki.models.gpu import loaded, prefetched
 from tokimeki.models.wd14 import Prediction, Wd14Tagger
 from tokimeki.stages.base import Context
 from tokimeki.stages.frames import ensure_frames, planned_frames
@@ -37,7 +40,7 @@ Conservative on purpose: WD14 calls a frame questionable when that score is the 
 the four ratings, usually well above 0.5. Lowering the value drops more shots.
 """
 
-FRAMES_PER_BATCH = 64
+SHOTS_PER_COMMIT = 32
 log = logging.getLogger("tokimeki")
 
 
@@ -78,39 +81,48 @@ def reset(ctx: Context, episode: Episode) -> None:
         clear_stage(ctx.conn, episode.id, NAME)
 
 
-def _batches(episode: Episode, shots: Sequence[Shot]) -> Iterator[list[tuple[Shot, list[int]]]]:
-    batch: list[tuple[Shot, list[int]]] = []
-    size = 0
-    for shot in shots:
-        frames = planned_frames(episode, shot)
-        batch.append((shot, frames))
-        size += len(frames)
-        if size >= FRAMES_PER_BATCH:
-            yield batch
-            batch, size = [], 0
-    if batch:
-        yield batch
+def _predictions(
+    ctx: Context, episode: Episode, tagger: Wd14Tagger, frames: Sequence[int]
+) -> Iterator[Prediction]:
+    """WD14 predictions for `frames` in order; the next batch is decoded while the GPU runs."""
+    size = tagger.batch_size
+    chunks = [frames[i : i + size] for i in range(0, len(frames), size)]
+
+    def prepare(chunk: Sequence[int]) -> NDArray[np.float32]:
+        paths = [ctx.paths.frame_path(episode.id, i) for i in chunk]
+        return tagger.prepare([load_image(p, tagger.size) for p in paths])
+
+    for _, batch in prefetched(chunks, prepare):
+        yield from tagger.infer(batch)
+
+
+def _commit(ctx: Context, episode: Episode, verdicts: list[tuple[Shot, list[RatedFrame]]]) -> None:
+    dropped = {shot.id for shot, rated in verdicts if any(is_unsafe(f.rating) for f in rated)}
+    for shot, rated in verdicts:
+        if shot.id in dropped:
+            for frame in rated:
+                ctx.paths.frame_path(episode.id, frame.frame_index).unlink(missing_ok=True)
+    with transaction(ctx.conn):
+        for shot, rated in verdicts:
+            if shot.id in dropped:
+                drop_shot(ctx.conn, shot.id)
+            else:
+                keep_shot(ctx.conn, shot.id, rated)
 
 
 def _filter(ctx: Context, episode: Episode, tagger: Wd14Tagger) -> None:
     start = time.monotonic()
     pending = list_shots(ctx.conn, episode.id, ShotStatus.PENDING)
     ensure_frames(ctx, episode, pending)
-    for batch in _batches(episode, pending):
-        paths = [ctx.paths.frame_path(episode.id, i) for _, frames in batch for i in frames]
-        predictions = iter(tagger.predict([load_image(p, tagger.size) for p in paths]))
-        verdicts = [(shot, [rated_frame(i, next(predictions)) for i in idx]) for shot, idx in batch]
-        dropped = {shot.id for shot, rated in verdicts if any(is_unsafe(f.rating) for f in rated)}
-        for shot, rated in verdicts:
-            if shot.id in dropped:
-                for frame in rated:
-                    ctx.paths.frame_path(episode.id, frame.frame_index).unlink(missing_ok=True)
-        with transaction(ctx.conn):
-            for shot, rated in verdicts:
-                if shot.id in dropped:
-                    drop_shot(ctx.conn, shot.id)
-                else:
-                    keep_shot(ctx.conn, shot.id, rated)
+    plan = [(shot, planned_frames(episode, shot)) for shot in pending]
+    predictions = _predictions(ctx, episode, tagger, [i for _, frames in plan for i in frames])
+    for first in range(0, len(plan), SHOTS_PER_COMMIT):
+        group = plan[first : first + SHOTS_PER_COMMIT]
+        _commit(
+            ctx,
+            episode,
+            [(shot, [rated_frame(i, next(predictions)) for i in frames]) for shot, frames in group],
+        )
     prune_frames(ctx, episode)
     with transaction(ctx.conn):
         mark_stage_done(

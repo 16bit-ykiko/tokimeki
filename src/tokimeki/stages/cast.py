@@ -44,7 +44,7 @@ from tokimeki.models.ccip import (
     ccip_differences,
 )
 from tokimeki.models.faces import Detection, FaceDetector
-from tokimeki.models.gpu import loaded
+from tokimeki.models.gpu import loaded, prefetched
 from tokimeki.stages.base import Context
 from tokimeki.stages.clustering import NOISE, dbscan, evenly_spaced, nearest_cluster
 from tokimeki.stages.frames import ensure_frames
@@ -62,7 +62,6 @@ MAX_EXEMPLARS = 64
 NEAREST_EXEMPLARS = 3
 SPLIT_EPS_FACTOR = 0.7
 DETECT_LONG_SIDE = 640
-FRAMES_PER_BATCH = 64
 
 log = logging.getLogger("tokimeki")
 
@@ -127,48 +126,47 @@ def reset(ctx: Context, episode: Episode) -> None:
 
 def _detect(ctx: Context, episode: Episode, detector: FaceDetector) -> list[FoundFace]:
     frames = list_episode_frames(ctx.conn, episode.id)
+    size = detector.batch_size
+    chunks = [frames[i : i + size] for i in range(0, len(frames), size)]
+
+    def prepare(chunk: list[Frame]) -> NDArray[np.float32]:
+        paths = [ctx.paths.frame_path(episode.id, f.frame_index) for f in chunk]
+        return detector.prepare([load_image(p, DETECT_LONG_SIDE) for p in paths])
+
     found: list[FoundFace] = []
-    for start in range(0, len(frames), FRAMES_PER_BATCH):
-        batch = frames[start : start + FRAMES_PER_BATCH]
-        images = [
-            load_image(ctx.paths.frame_path(episode.id, f.frame_index), DETECT_LONG_SIDE)
-            for f in batch
-        ]
-        for frame, detections in zip(batch, detector.detect(images), strict=True):
+    for chunk, batch in prefetched(chunks, prepare):
+        for frame, detections in zip(chunk, detector.infer(batch), strict=True):
             found += [FoundFace(frame, d) for d in detections if d.y1 - d.y0 >= MIN_FACE_HEIGHT]
     return found
 
 
 def _embed(ctx: Context, episode: Episode, found: list[FoundFace], encoder: CcipEncoder) -> None:
-    for start in range(0, len(found), FRAMES_PER_BATCH):
-        batch = found[start : start + FRAMES_PER_BATCH]
+    size = encoder.batch_size
+    chunks = [found[i : i + size] for i in range(0, len(found), size)]
+
+    def prepare(chunk: list[FoundFace]) -> NDArray[np.float32]:
         images: dict[int, Image.Image] = {}
         crops: list[Image.Image] = []
-        for face in batch:
+        for face in chunk:
             index = face.frame.frame_index
             if index not in images:
                 images[index] = load_image(ctx.paths.frame_path(episode.id, index))
             image = images[index]
             crops.append(image.crop(head_box(face.detection, image.width, image.height)))
-        embeddings = encoder.embed(crops)
-        with transaction(ctx.conn):
-            add_faces(
-                ctx.conn,
-                [
-                    NewFace(
-                        face.frame.id,
-                        Box(
-                            face.detection.x0,
-                            face.detection.y0,
-                            face.detection.x1,
-                            face.detection.y1,
-                        ),
-                        face.detection.score,
-                        embedding,
-                    )
-                    for face, embedding in zip(batch, embeddings, strict=True)
-                ],
+        return encoder.prepare(crops)
+
+    for chunk, batch in prefetched(chunks, prepare):
+        faces = [
+            NewFace(
+                f.frame.id,
+                Box(f.detection.x0, f.detection.y0, f.detection.x1, f.detection.y1),
+                f.detection.score,
+                embedding,
             )
+            for f, embedding in zip(chunk, encoder.infer(batch), strict=True)
+        ]
+        with transaction(ctx.conn):
+            add_faces(ctx.conn, faces)
 
 
 def assign_clusters(conn: sqlite3.Connection, episode_id: int) -> int:

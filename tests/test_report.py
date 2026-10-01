@@ -51,7 +51,7 @@ def test_report_forgets_shots_dropped_later(
     assert any(p.name.startswith("shot-") for p in (index.parent / "img").iterdir())
 
     monkeypatch.setattr(fakes, "RED", fakes.BLUE)
-    monkeypatch.setattr(fakes.FakeTagger, "predict", fakes.unsafe_everything)
+    monkeypatch.setattr(fakes.FakeTagger, "infer", fakes.unsafe_everything)
     pipeline.redo(ctx, episodes, "filter")
     pipeline.run(ctx, episodes)
     build_report(ctx.conn, ctx.paths)

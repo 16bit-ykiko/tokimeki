@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from tokimeki.models.faces import decode_yolo, nms
+from tokimeki.models.faces import decode_yolo, input_size, nms
 
 
 def test_nms_keeps_the_best_of_overlapping_boxes() -> None:
@@ -18,3 +18,9 @@ def test_decode_yolo_normalises_and_thresholds() -> None:
     (face,) = decode_yolo(output, 640, 640, threshold=0.3)
     assert (face.x0, face.y0, face.x1, face.y1) == pytest.approx((0.45, 0.225, 0.55, 0.275))
     assert face.score == pytest.approx(0.9)
+
+
+def test_input_keeps_the_aspect_ratio_on_the_stride() -> None:
+    assert input_size(1280, 720) == (640, 384)
+    assert input_size(1920, 1080) == (640, 384)
+    assert input_size(1440, 1080) == (640, 480)

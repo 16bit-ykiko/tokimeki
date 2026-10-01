@@ -4,7 +4,9 @@ import gc
 import importlib
 import shutil
 import subprocess
-from collections.abc import Callable, Generator
+from collections import deque
+from collections.abc import Callable, Generator, Iterable
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol, cast
@@ -53,6 +55,26 @@ def loaded[M: GpuModel](name: str, factory: Callable[[], M]) -> Generator[M, Non
     finally:
         _loaded = None
         release_memory()
+
+
+def prefetched[T, P](
+    items: Iterable[T], prepare: Callable[[T], P]
+) -> Generator[tuple[T, P], None, None]:
+    """`(item, prepare(item))` in order, with the next item prepared on a worker thread meanwhile.
+
+    The CPU work for the next batch (JPEG decoding, resizing) then overlaps the GPU running the
+    current one instead of leaving it idle.
+    """
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="prefetch") as pool:
+        queued: deque[tuple[T, Future[P]]] = deque()
+        for item in items:
+            queued.append((item, pool.submit(prepare, item)))
+            if len(queued) > 1:
+                ready, future = queued.popleft()
+                yield ready, future.result()
+        while queued:
+            ready, future = queued.popleft()
+            yield ready, future.result()
 
 
 def loaded_model() -> str | None:

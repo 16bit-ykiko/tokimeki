@@ -1,6 +1,7 @@
 """Anime face detection (deepghs' YOLOv8 face models)."""
 
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -16,6 +17,8 @@ DETECTOR_REPO = "deepghs/anime_face_detection"
 DETECTOR_MODEL = "face_detect_v1.4_s"
 NMS_IOU = 0.7
 BATCH_SIZE = 16
+INPUT_LONG_SIDE = 640
+STRIDE = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,27 +74,43 @@ def decode_yolo(
     return out
 
 
+def input_size(width: int, height: int, long_side: int = INPUT_LONG_SIDE) -> tuple[int, int]:
+    """Keep the aspect ratio, long side `long_side`, both sides a multiple of the YOLO stride."""
+    scale = long_side / max(width, height)
+    return (
+        math.ceil(width * scale / STRIDE) * STRIDE,
+        math.ceil(height * scale / STRIDE) * STRIDE,
+    )
+
+
 class FaceDetector:
     def __init__(self, model: str = DETECTOR_MODEL) -> None:
         self._model = OnnxModel(fetch(DETECTOR_REPO, f"{model}/model.onnx"))
         with fetch(DETECTOR_REPO, f"{model}/threshold.json").open() as f:
             self.threshold = float(cast(dict[str, float], json.load(f))["threshold"])
-        imgsz = self._model.metadata.get("imgsz")
-        size = cast(list[int], json.loads(imgsz)) if imgsz else [640, 640]
-        self.input_h, self.input_w = size[0], size[1]
+        self.batch_size = BATCH_SIZE
 
-    def preprocess(self, image: Image.Image) -> NDArray[np.float32]:
-        """Stretch (no letterbox, as the models were exported) and lay out as CHW 0-1 floats."""
-        resized = image.convert("RGB").resize((self.input_w, self.input_h))
-        return (np.asarray(resized, dtype=np.float32) / 255.0).transpose(2, 0, 1)
+    def prepare(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        """CPU side: resized as YOLO's rectangular inference does, as NCHW 0-1 floats.
+
+        All images in a batch must share one size (frames of an episode do).
+        """
+        size = input_size(*images[0].size)
+        pixels = np.stack([np.asarray(im.convert("RGB").resize(size)) for im in images])
+        batch = np.ascontiguousarray(pixels.transpose(0, 3, 1, 2)).astype(np.float32)
+        batch *= np.float32(1 / 255)
+        return batch
+
+    def infer(self, batch: NDArray[np.float32]) -> list[list[Detection]]:
+        """GPU side: the faces in each image of a batch from `prepare`."""
+        height, width = batch.shape[2], batch.shape[3]
+        outputs = self._model.run({self._model.input_names[0]: batch})[0]
+        return [decode_yolo(o, width, height, self.threshold) for o in outputs]
 
     def detect(self, images: Sequence[Image.Image]) -> list[list[Detection]]:
-        name = self._model.input_names[0]
         out: list[list[Detection]] = []
-        for start in range(0, len(images), BATCH_SIZE):
-            batch = np.stack([self.preprocess(im) for im in images[start : start + BATCH_SIZE]])
-            for output in self._model.run({name: batch})[0]:
-                out.append(decode_yolo(output, self.input_w, self.input_h, self.threshold))
+        for start in range(0, len(images), self.batch_size):
+            out += self.infer(self.prepare(images[start : start + self.batch_size]))
         return out
 
     def close(self) -> None:

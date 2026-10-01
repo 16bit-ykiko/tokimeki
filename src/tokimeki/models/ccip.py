@@ -26,15 +26,21 @@ def ccip_preprocess(image: Image.Image) -> NDArray[np.float32]:
 class CcipEncoder:
     def __init__(self, model: str = CCIP_MODEL) -> None:
         self._model = OnnxModel(fetch(CCIP_REPO, f"{model}/model_feat.onnx"))
+        self.batch_size = CCIP_BATCH_SIZE
+
+    def prepare(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        """CPU side: one input batch."""
+        return np.stack([ccip_preprocess(im) for im in images]).astype(np.float32)
+
+    def infer(self, batch: NDArray[np.float32]) -> NDArray[np.float32]:
+        """GPU side: one embedding row per image of a batch from `prepare`."""
+        return self._model.run({self._model.input_names[0]: batch})[0]
 
     def embed(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
-        name = self._model.input_names[0]
-        chunks: list[NDArray[np.float32]] = []
-        for start in range(0, len(images), CCIP_BATCH_SIZE):
-            batch = np.stack(
-                [ccip_preprocess(im) for im in images[start : start + CCIP_BATCH_SIZE]]
-            )
-            chunks.append(self._model.run({name: batch.astype(np.float32)})[0])
+        chunks = [
+            self.infer(self.prepare(images[start : start + self.batch_size]))
+            for start in range(0, len(images), self.batch_size)
+        ]
         return np.concatenate(chunks) if chunks else np.zeros((0, 0), dtype=np.float32)
 
     def close(self) -> None:

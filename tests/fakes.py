@@ -44,17 +44,24 @@ def fake_extract(
         Image.new("RGB", (64, 36), frame_color(index)).save(out)
 
 
+def _corners(images: Sequence[Image.Image]) -> NDArray[np.float32]:
+    return np.stack([np.asarray(im, dtype=np.float32)[0, 0] for im in images])
+
+
 class FakeTagger:
     """Calls a red frame questionable."""
 
     repo = "fake/wd14"
     size = 64
+    batch_size = 2
 
-    def predict(self, images: Sequence[Image.Image]) -> list[Prediction]:
+    def prepare(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        return _corners(images)
+
+    def infer(self, batch: NDArray[np.float32]) -> list[Prediction]:
         out: list[Prediction] = []
-        for image in images:
-            pixel = np.asarray(image)[0, 0]
-            red = int(pixel[0]) > int(pixel[2])
+        for pixel in batch:
+            red = bool(pixel[0] > pixel[2])
             rating = {
                 "general": 0.2 if red else 0.9,
                 "sensitive": 0.2,
@@ -71,8 +78,13 @@ class FakeTagger:
 class FakeDetector:
     """One face in the middle of every frame."""
 
-    def detect(self, images: Sequence[Image.Image]) -> list[list[Detection]]:
-        return [[Detection(0.4, 0.3, 0.6, 0.7, 0.9)] for _ in images]
+    batch_size = 3
+
+    def prepare(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        return _corners(images)
+
+    def infer(self, batch: NDArray[np.float32]) -> list[list[Detection]]:
+        return [[Detection(0.4, 0.3, 0.6, 0.7, 0.9)] for _ in batch]
 
     def close(self) -> None:
         pass
@@ -81,8 +93,13 @@ class FakeDetector:
 class FakeEncoder:
     """The same character everywhere."""
 
-    def embed(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
-        return np.ones((len(images), 8), dtype=np.float32)
+    batch_size = 3
+
+    def prepare(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        return _corners(images)
+
+    def infer(self, batch: NDArray[np.float32]) -> NDArray[np.float32]:
+        return np.ones((len(batch), 8), dtype=np.float32)
 
     def close(self) -> None:
         pass
@@ -97,6 +114,6 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cast, "CcipEncoder", FakeEncoder)
 
 
-def unsafe_everything(self: FakeTagger, images: Sequence[Image.Image]) -> list[Prediction]:
+def unsafe_everything(self: FakeTagger, batch: NDArray[np.float32]) -> list[Prediction]:
     unsafe = {"general": 0.1, "sensitive": 0.3, "questionable": 0.7, "explicit": 0.1}
-    return [Prediction(unsafe, {}, {}) for _ in images]
+    return [Prediction(unsafe, {}, {}) for _ in batch]
