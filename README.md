@@ -21,7 +21,7 @@ First series: _To LOVE-Ru Darkness_ and _Darkness 2nd_ (12 + 14 = 26 episodes).
    pixi run tokimeki cast split ~/anime/to-love-ru-darkness 3          # re-cluster 3 more tightly
    pixi run tokimeki cast recluster ~/anime/to-love-ru-darkness        # redo all unnamed clusters (no GPU, seconds)
    ```
-4. **Lines and speakers.** External ASS subtitles when the release has them; otherwise faster-whisper (Japanese). Speakers from the subtitle's actor field, or by clustering voices and matching clusters to characters.
+4. **Lines and speakers.** External ASS subtitles next to the video (same basename, `.ass`) when they exist; otherwise faster-whisper (Japanese) on the main audio track, never a commentary track. Speakers come from clustering voices and matching the clusters to characters; the actor field is not reliable (the Darkness subtitles put the placeholder `NTP` on every line). Lyric styles (`opjp`/`opcn`/`edjp`/`edcn` in the Darkness subtitles) mark the OP/ED time ranges for free. Subtitle timing must be checked against the video before it is trusted.
 5. **Scenes.** In a romantic comedy the cute moment is usually an exchange and a reaction, not one shot. Consecutive shots are merged into scenes by dialogue continuity and visual similarity.
 6. **Understanding.**
    - Cheap, local, everywhere: WD14 expression tags (`smile`, `blush`, `:d`, `pout`, `wink`, `>_<` …) per frame; the original BGM's mood (comedic, warm, tense) from an audio embedding such as CLAP, as a weak extra signal.
