@@ -29,7 +29,7 @@ from tokimeki.song.analysis import (
     SongError,
     analyse_song,
     load_analysis,
-    suggested_slots,
+    slots_over,
 )
 from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages.base import Context, open_series, register_episodes
@@ -143,11 +143,23 @@ def plan_context(
     song: str | None = None,
     min_presence: float = 0.34,
     boost: Mapping[str, float] | None = None,
+    span: str | None = None,
+    max_slots: int | None = None,
+    beats: Mapping[str, int] | None = None,
 ) -> Json:
-    """The song (if given) and every candidate scene and shot of the character."""
+    """The song (if given; its slots over `span`, at most `max_slots`, `beats` per section
+    kind when set) and every candidate scene and shot of the character."""
     ctx = _series(series)
     return build_context(
-        ctx, character, _episodes(ctx, episodes), _analysis(song), min_presence, boost or {}
+        ctx,
+        character,
+        _episodes(ctx, episodes),
+        _analysis(song),
+        min_presence,
+        boost or {},
+        parse_range(span) if span else None,
+        max_slots,
+        beats,
     )
 
 
@@ -241,8 +253,15 @@ def plan_auto(
     min_presence: float = 0.34,
     boost: Mapping[str, float] | None = None,
     output: str | None = None,
+    span: str | None = None,
+    max_slots: int | None = None,
+    beats: Mapping[str, int] | None = None,
 ) -> Json:
-    """A complete draft plan from the heuristic arranger, refined and written to disk."""
+    """A complete draft plan from the heuristic arranger, refined and written to disk.
+
+    `span` picks the excerpt (song seconds, snapped to bar lines); `max_slots` caps the cuts,
+    so that only the best shots are needed; `beats` fixes beats per slot for section kinds.
+    """
     ctx = _series(series)
     analysis = _analysis(song)
     if analysis is None:
@@ -252,7 +271,11 @@ def plan_auto(
     )
     if not candidates:
         raise ApiError(f"no kept shots of {character} outside the OP/ED")
-    slots = suggested_slots(analysis, len(candidates))
+    budget = min(len(candidates), max_slots) if max_slots else len(candidates)
+    try:
+        _, slots = slots_over(analysis, parse_range(span) if span else None, budget, beats)
+    except SongError as error:
+        raise ApiError(str(error)) from error
     if len(slots) > len(candidates):
         raise ApiError(f"{len(slots)} slots but only {len(candidates)} shots; pick a shorter range")
     plan = draft(name, str(ctx.paths.root), character, analysis.id, slots, candidates)

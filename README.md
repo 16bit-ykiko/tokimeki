@@ -64,16 +64,18 @@ Every command prints JSON; `plan validate` exits 1 when the plan has errors.
 
 ```bash
 S=~/anime/to-love-ru-darkness
-pixi run tokimeki song analyze $S/music/momo-single/GNCA-0262.cue --track 1    # or any audio file; hints: --lyrics x.lrc, --instrumental y.flac; --range 0:58-1:21
-pixi run tokimeki plan context $S --character 梦梦 --episode 01 --song more-more-ff5756b3 > context.json
+E="$S/s1/[VCB-Studio] To LOVE-Ru Darkness [01][Ma10p_1080p][x265_flac_aac]"
+pixi run tokimeki song analyze "$E.mkv" --within 20:37-21:58 --title 楽園PROJECT \
+  --lyrics "$S/.tokimeki/subs/zh-hant/${E##*/}.ass#opjp@ja" --lyrics "$E.ass#opcn@zh"   # any audio file or .cue --track N too
+pixi run tokimeki plan context $S --character 梦梦 --episode 01 --song project-d3e6341c --range 41.76-89.39 --max-slots 20 > context.json
 pixi run tokimeki plan schema                                               # the plan format
-pixi run tokimeki plan auto $S --character 梦梦 --episode 01 --song more-more-ff5756b3 --name momo-ep1 -o plan.json   # a draft to edit
+pixi run tokimeki plan auto $S --character 梦梦 --episode 01 --song project-d3e6341c --name momo-ep1 --range 41.76-89.39 --max-slots 20 --min-presence 0.5   # a draft to edit
 pixi run tokimeki plan validate plan.json
 pixi run tokimeki plan refine plan.json                                     # beats exact, missing windows filled
 pixi run tokimeki render plan.json --preview --otio                         # then --final; --subs none for no lyrics
 ```
 
-The context lists the song (sections, beats, lyrics, suggested slots) and every candidate scene of the character: its lines with times, and per shot the time range, framing, how much of it she is in, her face size, her cutest moments with WD14 expression tags, and the path of a keyframe to look at. A plan may leave `in`/`out` out; render fills them as `plan refine` would. Outputs go to `<series>/.tokimeki/mads/<name>/`.
+`--range` picks the excerpt for this MAD (song seconds or m:ss, snapped to bar lines; the stored one otherwise), `--max-slots` caps the cuts so only the best shots are needed (slots grow, verse first, up to 4 s), `--beats chorus=4` fixes the beats per slot of a section kind. The context lists the song (sections, beats, lyrics, suggested slots) and every candidate scene of the character: its lines with times, and per shot the time range, framing, how much of it she is in, her face size, her cutest moments with WD14 expression tags, and the path of a keyframe to look at. A plan may leave `in`/`out` out; render fills them as `plan refine` would. Outputs go to `<series>/.tokimeki/mads/<name>/`.
 
 ## Layout and data
 

@@ -11,9 +11,8 @@ from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
-from tokimeki.song.analysis import SongAnalysis
+from tokimeki.song.analysis import SongAnalysis, slots_over
 from tokimeki.song.lyrics import pair
-from tokimeki.song.slots import excerpt_between, make_slots
 from tokimeki.stages.base import Context
 from tokimeki.stages.scenes import summaries
 
@@ -48,12 +47,14 @@ def _shot(ctx: Context, c: Candidate) -> Json:
     }
 
 
-def _song(analysis: SongAnalysis, budget: int) -> Json:
-    start, end = analysis.excerpt
-    excerpt = excerpt_between(
-        analysis.bars, analysis.source.duration, analysis.sections, start, end
-    )
-    fitted = make_slots(analysis.beats, analysis.bars, analysis.bpm, excerpt, budget)
+def _song(
+    analysis: SongAnalysis,
+    budget: int,
+    span: tuple[float, float] | None,
+    fixed: Mapping[str, int] | None,
+) -> Json:
+    excerpt, fitted = slots_over(analysis, span, budget, fixed)
+    start, end = excerpt.start, excerpt.end
     return {
         "id": analysis.id,
         "title": analysis.title,
@@ -75,8 +76,9 @@ def _song(analysis: SongAnalysis, budget: int) -> Json:
             {"start": _r(s.start, 3), "end": _r(s.end, 3), "section": s.section, "beats": s.beats}
             for s in fitted
         ],
-        "slots_note": "a suggestion fitted to the number of candidate shots: a cut a bar in "
-        "verses, every two beats in the chorus, slower where shots run short; any beats will do",
+        "slots_note": "a suggestion fitted to the number of candidate shots (or --max-slots): a "
+        "cut a bar in verses, every two beats in the chorus, slower where shots run short; any "
+        "beats will do",
     }
 
 
@@ -87,6 +89,9 @@ def build_context(
     analysis: SongAnalysis | None,
     min_presence: float,
     boost: Mapping[str, float],
+    span: tuple[float, float] | None = None,
+    max_slots: int | None = None,
+    fixed: Mapping[str, int] | None = None,
 ) -> Json:
     candidates = find_candidates(ctx, character, episodes, boost, min_presence)
     by_scene: dict[tuple[str, int], list[Candidate]] = {}
@@ -135,5 +140,6 @@ def build_context(
         "scenes": scenes,
     }
     if analysis is not None:
-        out["song"] = _song(analysis, len(candidates))
+        budget = min(len(candidates), max_slots) if max_slots else len(candidates)
+        out["song"] = _song(analysis, budget, span, fixed)
     return out

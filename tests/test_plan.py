@@ -14,7 +14,7 @@ from tokimeki.mad.arrange import arrange, fits
 from tokimeki.mad.candidates import Candidate, FramePoint, cuteness
 from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, SlotPlan
 from tokimeki.mad.refine import frame_ceil, frame_floor, refine, window
-from tokimeki.song.analysis import SongAnalysis, SongSource, save_analysis
+from tokimeki.song.analysis import SongAnalysis, SongSource, save_analysis, slots_over
 from tokimeki.song.slots import Slot
 from tokimeki.song.structure import Section
 from tokimeki.stages import pipeline
@@ -153,3 +153,22 @@ def test_context_auto_validate_refine(series: Path) -> None:
     issues = cast(list[dict[str, object]], report["issues"])
     assert {"shot.not_kept", "slot.off_beat"} <= {i["code"] for i in issues}
     assert not report["ok"]
+
+
+def test_ranges_and_slot_caps() -> None:
+    analysis = song(0.5, 20.0)
+    excerpt, cut = slots_over(analysis, (10.3, 18.2), budget=100)
+    assert (excerpt.start, excerpt.end) == (10.0, 18.0)
+    assert [(s.section, s.beats) for s in cut] == [("chorus", 2)] * 8
+    _, capped = slots_over(analysis, (10.3, 18.2), budget=3)
+    assert [(s.start, s.end) for s in capped] == [(10.0, 14.0), (14.0, 18.0)]
+    _, fixed = slots_over(analysis, None, budget=100, fixed={"chorus": 4})
+    assert [s.beats for s in fixed if s.section == "chorus"] == [4] * 5
+
+
+def test_auto_takes_a_range_and_a_cap(series: Path) -> None:
+    context = api.plan_context(str(series), "梦梦", song="test-song", span="0-1", max_slots=1)
+    slots = cast(list[object], cast(dict[str, object], context["song"])["slots"])
+    assert len(slots) == 1
+    result = api.plan_auto(str(series), "梦梦", "test-song", "short", span="0-1", max_slots=1)
+    assert cast(dict[str, object], result["validation"])["ok"]

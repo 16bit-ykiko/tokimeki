@@ -13,7 +13,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from itertools import pairwise
 from pathlib import Path
@@ -378,14 +378,21 @@ def excerpt_of(analysis: SongAnalysis, span: tuple[float, float] | None) -> Exce
     return excerpt_between(analysis.bars, analysis.source.duration, analysis.sections, start, end)
 
 
+def slots_over(
+    analysis: SongAnalysis,
+    span: tuple[float, float] | None = None,
+    budget: int = UNLIMITED,
+    fixed: Mapping[str, int] | None = None,
+) -> tuple[Excerpt, list[Slot]]:
+    """The excerpt (`span` snapped to bar lines, or the stored one) and slots over it: a bar
+    a cut in verses, two beats in the chorus (or `fixed` beats per section kind), slowed down
+    section by section until no more than `budget` shots are needed."""
+    excerpt = excerpt_of(analysis, span if span is not None else analysis.excerpt)
+    return excerpt, make_slots(analysis.beats, analysis.bars, analysis.bpm, excerpt, budget, fixed)
+
+
 def suggested_slots(analysis: SongAnalysis, budget: int = UNLIMITED) -> list[Slot]:
-    """Slots over the stored excerpt: a bar a cut in verses, two beats in the chorus, slowed
-    down section by section until no more than `budget` shots are needed."""
-    start, end = analysis.excerpt
-    excerpt = excerpt_between(
-        analysis.bars, analysis.source.duration, analysis.sections, start, end
-    )
-    return make_slots(analysis.beats, analysis.bars, analysis.bpm, excerpt, budget)
+    return slots_over(analysis, None, budget)[1]
 
 
 def analyse_song(

@@ -105,6 +105,10 @@ def _boosts(values: list[str] | None) -> dict[str, float]:
     return out
 
 
+def _beats(values: list[str] | None) -> dict[str, int]:
+    return {k: int(v) for k, v in _boosts(values).items()}
+
+
 def cmd_song_analyze(args: argparse.Namespace) -> int:
     audio: str = args.audio
     track: int | None = args.track
@@ -138,7 +142,14 @@ def cmd_plan_context(args: argparse.Namespace) -> int:
     song: str | None = args.song
     presence: float = args.min_presence
     boost = _boosts(args.boost)
-    return _emit(lambda: api.plan_context(series, character, episodes, song, presence, boost))
+    span: str | None = args.range
+    max_slots: int | None = args.max_slots
+    beats = _beats(args.beats)
+    return _emit(
+        lambda: api.plan_context(
+            series, character, episodes, song, presence, boost, span, max_slots, beats
+        )
+    )
 
 
 def cmd_plan_auto(args: argparse.Namespace) -> int:
@@ -150,8 +161,13 @@ def cmd_plan_auto(args: argparse.Namespace) -> int:
     presence: float = args.min_presence
     boost = _boosts(args.boost)
     output: str | None = args.output
+    span: str | None = args.range
+    max_slots: int | None = args.max_slots
+    beats = _beats(args.beats)
     return _emit(
-        lambda: api.plan_auto(series, character, song, name, episodes, presence, boost, output)
+        lambda: api.plan_auto(
+            series, character, song, name, episodes, presence, boost, output, span, max_slots, beats
+        )
     )
 
 
@@ -293,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--episode", action="append", help="only episodes containing this")
         p.add_argument("--min-presence", type=float, default=0.34, help="share of a shot she is in")
         p.add_argument("--boost", action="append", help="weigh an expression tag, e.g. blush=2")
+        p.add_argument("--range", help="the excerpt in song time, e.g. 41.76-89.39 or 0:42-1:29")
+        p.add_argument("--max-slots", type=int, help="at most this many cuts (fewer, better shots)")
+        p.add_argument("--beats", action="append", help="beats per slot for a section, chorus=4")
     context.add_argument("--song", help="song id from `song analyze`, to include its slots")
     auto.add_argument("--song", required=True, help="song id from `song analyze`")
     auto.add_argument("--name", required=True, help="the MAD's name")
