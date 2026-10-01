@@ -36,9 +36,33 @@ You provide the episodes; nothing here downloads them. Prefer releases without b
 
 ## Layout and data
 
-- The repository holds code only. Episodes, songs and everything derived live in a data directory outside it (e.g. `~/anime/<series>/`).
-- Per series: one SQLite database for the library; regenerable intermediates (sampled frames, embeddings) in a cache that can be deleted and rebuilt.
+- The repository holds code only. Episodes, songs and everything derived live in a data directory outside it.
+- Episodes stay where you put them and are only read. Everything derived goes into a hidden `.tokimeki/` next to them:
+
+  ```
+  ~/anime/to-love-ru-darkness/        # your episodes (*.mkv …), never written to
+    .tokimeki/
+      library.db                      # the series library (SQLite)
+      cache/frames/<episode id>/      # sampled frames as JPEG; regenerable, safe to delete
+      report/index.html               # the static review page and its images
+  ```
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.
+
+## Code layout
+
+Dependencies point one way: `cli` → `stages` / `report` → `models`, `media`, `library`.
+
+```
+src/tokimeki/
+  cli.py        the `tokimeki` command
+  paths.py      where a series keeps its library, cache and report
+  library/      SQLite: schema and migrations, typed records, queries
+  media/        ffprobe, NVDEC decoding and frame extraction, frame sampling
+  models/       the only place third-party models and untyped libraries are touched:
+                typed wrappers, GPU lifecycle (one model at a time), no CPU fallback
+  stages/       pipeline stages (shots, content filter, cast); each idempotent and resumable
+  report/       the static HTML report
+```
 
 ## Hardware and cost
 
@@ -47,10 +71,15 @@ You provide the episodes; nothing here downloads them. Prefer releases without b
 
 ## Development
 
-[pixi](https://pixi.sh) manages the environment (Python 3.12, ffmpeg, and later PyTorch with CUDA from conda-forge).
+[pixi](https://pixi.sh) manages the environment: Python 3.12, a CUDA build of ffmpeg (NVDEC, `scale_cuda`), PyTorch and onnxruntime, all from conda-forge.
 
 ```bash
 pixi install
-pixi run check   # ruff lint + format check + basedpyright strict
-pixi run test
+pixi run tokimeki gpu-check   # NVDEC, PyTorch and onnxruntime each prove they run on the GPU
+pixi run check                # ruff lint + format check + basedpyright strict
+pixi run test                 # GPU tests are skipped where there is no GPU
 ```
+
+- The environment is solved for CUDA 12.9 (`platforms = [{ platform = "linux-64", cuda = "12.9" }]`). pixi finds the driver through `nvidia-smi`; on WSL that lives in `/usr/lib/wsl/lib`, which must be on `PATH` (or set `CONDA_OVERRIDE_CUDA=12.9`).
+- Nothing heavy falls back to the CPU: without NVDEC or CUDA the pipeline stops with an error. CPU thread pools are kept small (`models.CPU_THREADS`).
+- CI type-checks in the small `lint` environment (CPU PyTorch: same annotations, no CUDA libraries).

@@ -8,20 +8,40 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = []
 
+[project.scripts]
+tokimeki = "tokimeki.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = [{ platform = "linux-64", cuda = "12.9" }]
 
 [tool.pixi.dependencies]
 python = "3.12.*"
-ffmpeg = "*"
+numpy = "*"
+pillow = "*"
 
 [tool.pixi.pypi-dependencies]
 tokimeki = { path = ".", editable = true }
+
+[tool.pixi.feature.gpu.dependencies]
+ffmpeg = "*"
+cuda-version = "12.9.*"
+pytorch-gpu = "*"
+onnxruntime = { version = "*", build = "*cuda*" }
+huggingface_hub = "*"
+pandas = "*"
+tqdm = "*"
+
+[tool.pixi.feature.gpu.pypi-dependencies]
+transnetv2-pytorch = "==1.0.5"
+
+# Type checking needs PyTorch's annotations, not its CUDA libraries; CI runners have no GPU.
+[tool.pixi.feature.typing.dependencies]
+pytorch-cpu = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
@@ -29,7 +49,8 @@ basedpyright = "*"
 pytest = "*"
 
 [tool.pixi.environments]
-default = { features = ["dev"], solve-group = "default" }
+default = { features = ["gpu", "dev"], solve-group = "default" }
+lint = { features = ["typing", "dev"] }
 
 [tool.pixi.tasks]
 lint = "ruff check ."
@@ -52,3 +73,4 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["gpu: needs an NVIDIA GPU with NVDEC, CUDA PyTorch and CUDA onnxruntime"]

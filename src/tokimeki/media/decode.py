@@ -1,0 +1,191 @@
+"""Decoding on the GPU (NVDEC), resizing there too, and only small frames copied back.
+
+ffmpeg never falls back to CPU decoding silently here: frames stay in CUDA memory until
+`hwdownload`, so a software-decoded frame cannot enter the `scale_cuda` filters and the
+run fails instead.
+"""
+
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Sequence
+from pathlib import Path
+
+import numpy as np
+from numpy.typing import NDArray
+
+from tokimeki.media.probe import VideoInfo, probe
+
+TRANSNET_SIZE = (48, 27)
+FRAME_HEIGHT = 720
+JPEG_QUALITY = 3
+
+_CPU_THREADS = ["-threads", "1", "-filter_threads", "1", "-filter_complex_threads", "1"]
+
+
+class DecodeError(RuntimeError):
+    pass
+
+
+def _even(value: float) -> int:
+    return max(2, round(value / 2) * 2)
+
+
+def _input(path: Path) -> list[str]:
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        *_CPU_THREADS,
+        "-hwaccel",
+        "cuda",
+        "-hwaccel_output_format",
+        "cuda",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-sn",
+        "-dn",
+        "-fps_mode",
+        "passthrough",
+    ]
+
+
+def gpu_resize(width: int, height: int, target_width: int, target_height: int) -> list[str]:
+    """`scale_cuda` steps from `width`x`height` down to the target, also converting to 8-bit nv12.
+
+    A single step from 1080p to a thumbnail aliases badly, so the frame is halved (a 2x2
+    average) while it stays at least as large as the target, then resized once more.
+    """
+    steps: list[str] = []
+    w, h = width, height
+    while w // 2 >= target_width and h // 2 >= target_height:
+        w, h = _even(w / 2), _even(h / 2)
+        steps.append(f"scale_cuda=w={w}:h={h}:interp_algo=bilinear:format=nv12")
+    steps.append(f"scale_cuda=w={target_width}:h={target_height}:interp_algo=lanczos:format=nv12")
+    return steps
+
+
+def _run(args: Sequence[str], what: str) -> bytes:
+    result = subprocess.run(args, capture_output=True, check=False)
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace").strip()
+        raise DecodeError(f"NVDEC {what} failed (no CPU fallback):\n{stderr}")
+    return result.stdout
+
+
+def decode_for_transnet(path: Path, info: VideoInfo) -> NDArray[np.uint8]:
+    """Every frame of the video as `(frames, 27, 48, 3)` RGB, the input TransNetV2 expects."""
+    tw, th = TRANSNET_SIZE
+    mid_w, mid_h = _even(min(info.width, tw * 5)), _even(min(info.height, th * 5))
+    chain = [*gpu_resize(info.width, info.height, mid_w, mid_h), "hwdownload", "format=nv12"]
+    chain.append(f"scale={tw}:{th}:flags=area")
+    raw = _run(
+        [*_input(path), "-vf", ",".join(chain), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        "decode",
+    )
+    frame_bytes = tw * th * 3
+    if len(raw) % frame_bytes:
+        raise DecodeError(f"{path}: decoder returned a partial frame")
+    return np.frombuffer(raw, dtype=np.uint8).reshape(-1, th, tw, 3)
+
+
+def frame_size(info: VideoInfo, height: int = FRAME_HEIGHT) -> tuple[int, int]:
+    out_h = _even(min(height, info.height))
+    return _even(info.width * out_h / info.height), out_h
+
+
+def _select_expr(indices: Sequence[int]) -> str:
+    """A balanced `if(lt(n, k), …)` tree, so each frame costs O(log n) to test."""
+    if len(indices) == 1:
+        return f"eq(n\\,{indices[0]})"
+    mid = len(indices) // 2
+    left, right = _select_expr(indices[:mid]), _select_expr(indices[mid:])
+    return f"if(lt(n\\,{indices[mid]})\\,{left}\\,{right})"
+
+
+def extract_frames(
+    path: Path,
+    info: VideoInfo,
+    frame_indices: Sequence[int],
+    out_paths: Sequence[Path],
+    height: int = FRAME_HEIGHT,
+) -> None:
+    """Write the frames at `frame_indices` (decode order, from 0) as JPEGs to `out_paths`."""
+    if len(frame_indices) != len(out_paths):
+        raise ValueError("one output path per frame index")
+    if not frame_indices:
+        return
+    order = sorted(range(len(frame_indices)), key=lambda i: frame_indices[i])
+    indices = [frame_indices[i] for i in order]
+    if len(set(indices)) != len(indices):
+        raise ValueError("frame indices must be unique")
+    width, out_h = frame_size(info, height)
+    chain = [
+        f"select={_select_expr(indices)}",
+        *gpu_resize(info.width, info.height, width, out_h),
+        "hwdownload",
+        "format=nv12",
+    ]
+    with tempfile.TemporaryDirectory(prefix="tokimeki-frames-") as tmp:
+        tmp_dir = Path(tmp)
+        script = tmp_dir / "filter.txt"
+        script.write_text(",".join(chain))
+        _run(
+            [
+                *_input(path),
+                "-/vf",
+                str(script),
+                "-c:v",
+                "mjpeg",
+                "-q:v",
+                str(JPEG_QUALITY),
+                "-start_number",
+                "0",
+                str(tmp_dir / "%07d.jpg"),
+            ],
+            "frame extraction",
+        )
+        written = sorted(tmp_dir.glob("*.jpg"))
+        if len(written) != len(indices):
+            raise DecodeError(
+                f"{path}: asked for {len(indices)} frames, decoder wrote {len(written)}"
+            )
+        for src, i in zip(written, order, strict=True):
+            out_paths[i].parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(src, out_paths[i])
+
+
+def nvdec_selftest(work_dir: Path) -> int:
+    """Encode a one-second synthetic clip and decode it through NVDEC; returns the frame count."""
+    clip = work_dir / "selftest.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=640x360:rate=24",
+            "-t",
+            "1",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-pix_fmt",
+            "yuv420p",
+            str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return len(decode_for_transnet(clip, probe(clip)))
