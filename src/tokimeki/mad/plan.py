@@ -1,8 +1,9 @@
 """The edit plan: the single source of truth for one MAD, a JSON file an agent writes.
 
 One entry per slot of the song: which shot fills it, the source window (`in`/`out`, episode
-seconds) and why. Rendering only reads the plan. `in`/`out`/`speed` may be left out;
-`tokimeki plan refine` (or render) fills them around the shot's expression peak.
+seconds) and why; and the original lines laid over the song (`voices`). Rendering only reads
+the plan. `in`/`out`/`speed` may be left out; `tokimeki plan refine` (or render) fills them
+around the shot's expression peak, and a voice's from its subtitle line.
 """
 
 import json
@@ -11,7 +12,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
-PLAN_SCHEMA = "tokimeki.plan/2"
+PLAN_SCHEMA = "tokimeki.plan/3"
+READABLE_SCHEMAS = ("tokimeki.plan/2", PLAN_SCHEMA)
 MIN_SPEED = 0.9
 MAX_SPEED = 1.1
 DEFAULT_FPS = "24000/1001"
@@ -51,6 +53,39 @@ class SlotPlan:
 
 
 @dataclass
+class VoicePlan:
+    at: float
+    """Song seconds where the line starts."""
+    line: int | None = None
+    """A dialogue line id from the context; fills `episode`, `in`, `out` and `text`."""
+    episode: str = ""
+    source_in: float | None = None
+    source_out: float | None = None
+    """Episode seconds of the voice heard."""
+    gain: float = 0.0
+    """dB on top of the automatic level (the voice a little above the ducked song)."""
+    duck: float | None = None
+    """dB the song is lowered under the line; DUCK_DB when left out."""
+    text: str = ""
+    sub: bool = True
+    """Show `text` as a dialogue subtitle."""
+    force: bool = False
+    """Allow the line over sung lyrics."""
+    why: str = ""
+
+    @property
+    def length(self) -> float | None:
+        if self.source_in is None or self.source_out is None:
+            return None
+        return self.source_out - self.source_in
+
+    @property
+    def end(self) -> float | None:
+        length = self.length
+        return None if length is None else self.at + length
+
+
+@dataclass
 class Plan:
     name: str
     series: str
@@ -58,6 +93,7 @@ class Plan:
     song: str
     slots: list[SlotPlan] = field(default_factory=list[SlotPlan])
     fps: str = DEFAULT_FPS
+    voices: list[VoicePlan] = field(default_factory=list[VoicePlan])
 
     @property
     def frame_rate(self) -> Fraction:
@@ -87,6 +123,26 @@ class Plan:
                 out["episode"] = s.episode
             return out
 
+        def voice(v: VoicePlan) -> Json:
+            out: Json = {"at": round(v.at, 4)}
+            if v.line is not None:
+                out["line"] = v.line
+            if v.episode:
+                out["episode"] = v.episode
+            if v.source_in is not None:
+                out["in"] = round(v.source_in, 4)
+            if v.source_out is not None:
+                out["out"] = round(v.source_out, 4)
+            out["gain"] = round(v.gain, 2)
+            if v.duck is not None:
+                out["duck"] = round(v.duck, 2)
+            out["text"] = v.text
+            out["sub"] = v.sub
+            if v.force:
+                out["force"] = True
+            out["why"] = v.why
+            return out
+
         return {
             "schema": PLAN_SCHEMA,
             "name": self.name,
@@ -95,6 +151,7 @@ class Plan:
             "song": self.song,
             "fps": self.fps,
             "slots": [slot(s) for s in self.slots],
+            "voices": [voice(v) for v in self.voices],
         }
 
     def to_json(self) -> str:
@@ -124,8 +181,24 @@ class Plan:
                 return None
             return float(value)
 
-        if d.get("schema", PLAN_SCHEMA) != PLAN_SCHEMA:
-            problems.append(f"schema: expected {PLAN_SCHEMA!r}")
+        def flag(obj: Json, key: str, where: str, default: bool) -> bool:
+            value = obj.get(key, default)
+            if not isinstance(value, bool):
+                problems.append(f"{where}{key}: expected true or false")
+                return default
+            return value
+
+        def integer(obj: Json, key: str, where: str) -> int | None:
+            value = obj.get(key)
+            if value is None:
+                return None
+            if isinstance(value, bool) or not isinstance(value, int):
+                problems.append(f"{where}{key}: expected an integer")
+                return None
+            return value
+
+        if d.get("schema", PLAN_SCHEMA) not in READABLE_SCHEMAS:
+            problems.append(f"schema: expected one of {', '.join(READABLE_SCHEMAS)}")
         plan = Plan(
             name=text(d, "name", ""),
             series=text(d, "series", ""),
@@ -162,6 +235,31 @@ class Plan:
                     speed=number(s, "speed", where, optional=True),
                     section=text(s, "section", where, ""),
                     episode=text(s, "episode", where, ""),
+                )
+            )
+        raw_voices = d.get("voices", [])
+        if not isinstance(raw_voices, list):
+            problems.append("voices: expected a list")
+            raw_voices = []
+        for i, raw in enumerate(cast(list[object], raw_voices)):
+            where = f"voices[{i}]."
+            if not isinstance(raw, dict):
+                problems.append(f"voices[{i}]: expected an object")
+                continue
+            v = cast(Json, raw)
+            plan.voices.append(
+                VoicePlan(
+                    at=number(v, "at", where) or 0.0,
+                    line=integer(v, "line", where),
+                    episode=text(v, "episode", where, ""),
+                    source_in=number(v, "in", where, optional=True),
+                    source_out=number(v, "out", where, optional=True),
+                    gain=number(v, "gain", where, optional=True) or 0.0,
+                    duck=number(v, "duck", where, optional=True),
+                    text=text(v, "text", where, ""),
+                    sub=flag(v, "sub", where, True),
+                    force=flag(v, "force", where, False),
+                    why=text(v, "why", where, ""),
                 )
             )
         if problems:
@@ -247,6 +345,49 @@ PLAN_JSON_SCHEMA: Json = {
                         "type": "string",
                         "description": "Informational: the shot's episode.",
                     },
+                },
+            },
+        },
+        "voices": {
+            "type": "array",
+            "description": "Original lines laid over the song, in its gaps (no sung lyrics); "
+            "the song is ducked smoothly under each. From the context's voice_lines.",
+            "items": {
+                "type": "object",
+                "required": ["at"],
+                "properties": {
+                    "at": {"type": "number", "description": "Song seconds where it starts."},
+                    "line": {
+                        "type": "integer",
+                        "description": "A voice_lines id; fills episode, in, out and text.",
+                    },
+                    "episode": {
+                        "type": "string",
+                        "description": "The episode, when giving in/out without a line.",
+                    },
+                    "in": {
+                        "type": "number",
+                        "description": "Episode seconds of the voice; refine trims a line's.",
+                    },
+                    "out": {"type": "number", "description": "Episode seconds."},
+                    "gain": {
+                        "type": "number",
+                        "default": 0,
+                        "description": "dB over the automatic level (a little above the ducked"
+                        " song); -20..12.",
+                    },
+                    "duck": {
+                        "type": "number",
+                        "description": "dB the song goes down under it (default 9); 0..24.",
+                    },
+                    "text": {"type": "string", "description": "Subtitle text; the line's."},
+                    "sub": {"type": "boolean", "default": True, "description": "Show text."},
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Allow it over sung lyrics.",
+                    },
+                    "why": {"type": "string"},
                 },
             },
         },

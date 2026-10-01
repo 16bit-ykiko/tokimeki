@@ -64,6 +64,15 @@ def lines_by_shot(
     return out
 
 
+def get_line(conn: sqlite3.Connection, line_id: int) -> Line:
+    row = conn.execute(
+        f"SELECT {_LINE_COLUMNS} FROM lines AS l WHERE l.id = ?", (line_id,)
+    ).fetchone()
+    if row is None:
+        raise KeyError(f"no line {line_id}")
+    return _line(row)
+
+
 def list_parts(conn: sqlite3.Connection, episode_id: int) -> list[Part]:
     rows: list[tuple[int, str, float, float]] = conn.execute(
         "SELECT episode_id, kind, start, end FROM episode_parts"

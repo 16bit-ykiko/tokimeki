@@ -2,16 +2,20 @@
 
 Only kept shots outside the OP/ED are listed, so only they can reach whoever reads it.
 Keyframes are paths to cached frames of those shots, for agents that can look at images.
+Voice lines are the dialogue of her scenes that kept shots cover, with who is on screen.
 """
 
 from collections.abc import Mapping, Sequence
 
 from tokimeki.library.records import Episode
 from tokimeki.mad.candidates import Candidate, find_candidates
+from tokimeki.mad.mix import DUCK_DB
 from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
+from tokimeki.mad.voices import usable_lines
 from tokimeki.song.analysis import SongAnalysis, slots_over
+from tokimeki.song.gaps import gaps, quiet_bars
 from tokimeki.song.lyrics import pair
 from tokimeki.stages.base import Context
 from tokimeki.stages.scenes import summaries
@@ -72,6 +76,11 @@ def _song(
             for p in pair(analysis.lyrics)
             if start - 1e-6 <= p.start < end
         ],
+        "gaps": [
+            {"start": _r(g.start, 3), "end": _r(g.end, 3), "len": _r(g.length), "where": g.where}
+            for g in gaps(analysis, start, end)
+        ],
+        "quiet_bars": [_r(b, 3) for b in quiet_bars(analysis, start, end)],
         "slots": [
             {"start": _r(s.start, 3), "end": _r(s.end, 3), "section": s.section, "beats": s.beats}
             for s in fitted
@@ -98,11 +107,14 @@ def build_context(
     for c in candidates:
         by_scene.setdefault((c.episode.path, c.scene), []).append(c)
     scenes: list[Json] = []
+    voice_lines: list[Json] = []
     for episode in episodes:
+        scene_of: dict[int, int] = {}
         for summary in summaries(ctx, episode):
             members = by_scene.get((episode.path, summary.scene.index))
             if not members:
                 continue
+            scene_of.update((shot, summary.scene.index) for shot in summary.scene.shot_ids)
             scenes.append(
                 {
                     "episode": episode.path,
@@ -112,6 +124,23 @@ def build_context(
                     "cast": {name: _r(share) for name, share in summary.cast},
                     "lines": [[_r(x.start), x.text.replace("\n", " ")] for x in summary.lines],
                     "shots": [_shot(ctx, c) for c in members],
+                }
+            )
+        for x in usable_lines(ctx, episode):
+            scene = next((scene_of[s] for s in x.shots if s in scene_of), None)
+            if scene is None:
+                continue
+            voice_lines.append(
+                {
+                    "line": x.line.id,
+                    "episode": episode.path,
+                    "scene": scene,
+                    "start": _r(x.line.start),
+                    "end": _r(x.line.end),
+                    "len": _r(x.line.end - x.line.start),
+                    "text": " ".join(x.line.text.split()),
+                    "shots": x.shots,
+                    "on_screen": x.on_screen,
                 }
             )
     out: Json = {
@@ -130,14 +159,19 @@ def build_context(
             "fps": DEFAULT_FPS,
             "kept_shots_only": True,
             "each_shot_once": True,
+            "voices": "inside song gaps (no sung lyrics) unless force; never from dropped shots;"
+            f" the song ducks {DUCK_DB:g} dB under each",
         },
         "legend": {
             "presence": "share of the shot's sampled frames the character is in",
             "face": "her largest face height as a share of the frame (close-up >= 0.35)",
             "peaks": "her cutest sampled moments: episode second, score, WD14 expression tags",
             "keyframe": "the cached frame at the best peak",
+            "voice_lines": "lines a voice may come from (subtitle times; refine trims to the"
+            " voice); speakers are unknown, on_screen says who is seen while it is said",
         },
         "scenes": scenes,
+        "voice_lines": voice_lines,
     }
     if analysis is not None:
         budget = min(len(candidates), max_slots) if max_slots else len(candidates)

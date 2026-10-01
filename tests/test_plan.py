@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import cast
@@ -9,12 +10,14 @@ import pytest
 from clips import make_clip
 
 from tokimeki import api
-from tokimeki.library.records import Episode, Shot, ShotStatus, TagStat
+from tokimeki.library.lines import NewLine, list_lines, replace_lines
+from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus, TagStat
 from tokimeki.mad.arrange import arrange, fits
 from tokimeki.mad.candidates import Candidate, FramePoint, cuteness
-from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, SlotPlan
+from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, SlotPlan, VoicePlan
 from tokimeki.mad.refine import frame_ceil, frame_floor, refine, window
 from tokimeki.song.analysis import SongAnalysis, SongSource, save_analysis, slots_over
+from tokimeki.song.lyrics import LyricLine
 from tokimeki.song.slots import Slot
 from tokimeki.song.structure import Section
 from tokimeki.stages import pipeline
@@ -172,3 +175,57 @@ def test_auto_takes_a_range_and_a_cap(series: Path) -> None:
     assert len(slots) == 1
     result = api.plan_auto(str(series), "梦梦", "test-song", "short", span="0-1", max_slots=1)
     assert cast(dict[str, object], result["validation"])["ok"]
+
+
+def test_plan_2_files_still_read_and_voices_round_trip() -> None:
+    old = {"schema": "tokimeki.plan/2", "name": "n", "series": "/s", "character": "c",
+           "song": "x", "slots": [{"start": 0, "end": 1, "shot": 3}]}  # fmt: skip
+    assert Plan.from_dict(old).voices == []
+    plan = Plan("n", "/s", "c", "x", [SlotPlan(0.0, 1.0, 3)])
+    plan.voices.append(VoicePlan(0.5, line=7, gain=-2.0, force=True, why="w"))
+    again = Plan.from_json(plan.to_json())
+    assert again.voices == plan.voices and again.to_dict()["schema"] == "tokimeki.plan/3"
+    with pytest.raises(PlanFormatError, match=r"voices\[0\]\.sub"):
+        Plan.from_dict({**old, "voices": [{"at": 0, "line": 1, "sub": "yes"}]})
+
+
+def test_voices_are_checked_against_lines_lyrics_and_dropped_shots(series: Path) -> None:
+    ctx = open_series(series)
+    (episode,) = register_episodes(ctx)
+    replace_lines(
+        ctx.conn,
+        episode.id,
+        [NewLine(1.2, 1.8, LineKind.DIALOGUE, "Default", "你好\n梦梦"),
+         NewLine(0.2, 0.8, LineKind.DIALOGUE, "Default", "dropped")],
+        [],
+    )  # fmt: skip
+    ctx.conn.commit()
+    dropped_line, kept_line = (x.id for x in list_lines(ctx.conn, episode.id))
+    analysis = song(beat=0.25, length=1.0, chorus_only=True)
+    save_analysis(replace(analysis, lyrics=[LyricLine(0.0, 0.5, "歌", "ja")]))
+    result = api.plan_auto(str(series), "梦梦", "test-song", "v", voices=False)
+    plan = Plan.from_dict(result["plan"])
+    plan.voices = [
+        VoicePlan(0.6, line=kept_line),
+        VoicePlan(0.1, line=kept_line, source_in=1.2, source_out=1.5),
+        VoicePlan(0.3, line=dropped_line, source_in=0.2, source_out=0.5),
+        VoicePlan(0.6, line=9999),
+    ]
+    codes = {(i["voice"], i["code"]) for i in _issues(api.plan_validate(plan.to_dict()))}
+    assert {(0, "voice.window"), (1, "voice.sung"), (2, "voice.dropped"),
+            (2, "voice.overlap"), (3, "voice.line_unknown")} <= codes  # fmt: skip
+    plan.voices = [VoicePlan(0.6, line=kept_line, source_in=1.3, source_out=1.6)]
+    path = series / "voiced.json"
+    path.write_text(plan.to_json(), encoding="utf-8")
+    refined = Plan.from_json(Path(str(api.plan_refine(str(path))["path"])).read_text())
+    (voice,) = refined.voices
+    assert (voice.text, voice.episode) == ("你好 梦梦", "ep01.mkv")
+    assert api.plan_validate(str(path))["ok"]
+    plan.voices[0].at = 0.2
+    assert not api.plan_validate(plan.to_dict())["ok"]
+    plan.voices[0].force = True
+    assert api.plan_validate(plan.to_dict())["ok"]
+
+
+def _issues(report: dict[str, object]) -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], report["issues"])

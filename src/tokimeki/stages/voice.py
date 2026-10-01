@@ -13,8 +13,8 @@ from numpy.typing import NDArray
 
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
-from tokimeki.library.records import Episode, ShotStatus
-from tokimeki.library.shots import list_shots
+from tokimeki.library.records import Episode
+from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio, encode_audio, main_audio
 from tokimeki.models.gpu import loaded
 from tokimeki.models.separation import MODEL_FILE, SAMPLE_RATE, VocalSeparator
@@ -29,18 +29,6 @@ log = logging.getLogger("tokimeki")
 
 def stem_path(paths: SeriesPaths, episode_id: int) -> Path:
     return paths.cache / "voice" / f"{episode_id}.flac"
-
-
-def kept_ranges(ctx: Context, episode: Episode) -> list[tuple[float, float]]:
-    """Kept shots' time ranges, adjacent ones joined."""
-    joined: list[tuple[float, float]] = []
-    for shot in list_shots(ctx.conn, episode.id, ShotStatus.KEPT):
-        start, end = episode.seconds(shot.start_frame), episode.seconds(shot.end_frame)
-        if joined and start - joined[-1][1] < 1e-6:
-            joined[-1] = (joined[-1][0], end)
-        else:
-            joined.append((start, end))
-    return joined
 
 
 def kept_gain(ranges: Sequence[tuple[float, float]], length: int, rate: int) -> NDArray[np.float32]:
@@ -74,7 +62,7 @@ def run(ctx: Context, episodes: Sequence[Episode]) -> None:
             stream = main_audio(source).index
             mix = decode_audio(source, SAMPLE_RATE, stream, channels=2)
             voice = separator.separate(mix)
-            voice *= kept_gain(kept_ranges(ctx, episode), voice.shape[1], SAMPLE_RATE)
+            voice *= kept_gain(kept_ranges(ctx.conn, episode), voice.shape[1], SAMPLE_RATE)
             encode_audio(voice, SAMPLE_RATE, stem_path(ctx.paths, episode.id))
             with transaction(ctx.conn):
                 mark_stage_done(ctx.conn, episode.id, NAME, {"model": MODEL_FILE})

@@ -7,23 +7,32 @@ prints these results; an MCP server can expose the same functions as tools uncha
 import re
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
 
-from tokimeki.library.episodes import get_episode
-from tokimeki.library.records import Episode
+from tokimeki.library.episodes import find_episode, get_episode, stage_done
+from tokimeki.library.lines import list_lines
+from tokimeki.library.records import Episode, LineKind
 from tokimeki.library.shots import get_shot
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
 from tokimeki.mad.fonts import FontError, prepare_fonts
-from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, mad_dir, write_plan
+from tokimeki.mad.plan import (
+    PLAN_JSON_SCHEMA,
+    Plan,
+    PlanFormatError,
+    VoicePlan,
+    mad_dir,
+    write_plan,
+)
 from tokimeki.mad.refine import refine
-from tokimeki.mad.render import FINAL, PREVIEW, export_timeline, render
+from tokimeki.mad.render import FINAL, PREVIEW, export_timeline, render, render_audio
 from tokimeki.mad.report import write_report
-from tokimeki.mad.subtitles import write_lyrics
+from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.validate import Issue, validate
+from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines, voice_bounds
 from tokimeki.song.analysis import (
     SongAnalysis,
     SongError,
@@ -32,6 +41,7 @@ from tokimeki.song.analysis import (
     slots_over,
 )
 from tokimeki.song.lyrics import LyricSource, pair
+from tokimeki.stages import voice
 from tokimeki.stages.base import Context, open_series, register_episodes
 
 type Json = dict[str, object]
@@ -233,7 +243,8 @@ def _refined(plan: Plan) -> tuple[Context, Plan, SongAnalysis, dict[int, Candida
         raise ApiError("the plan names no song")
     candidates = _plan_candidates(ctx, plan)
     refined, notes = refine(plan, analysis, candidates)
-    return ctx, refined, analysis, candidates, notes
+    voices, heard = refine_voices(ctx, refined)
+    return ctx, replace(refined, voices=voices), analysis, candidates, notes + heard
 
 
 def plan_refine(plan: str, output: str | None = None) -> Json:
@@ -256,19 +267,20 @@ def plan_auto(
     span: str | None = None,
     max_slots: int | None = None,
     beats: Mapping[str, int] | None = None,
+    voices: bool = True,
 ) -> Json:
     """A complete draft plan from the heuristic arranger, refined and written to disk.
 
     `span` picks the excerpt (song seconds, snapped to bar lines); `max_slots` caps the cuts,
     so that only the best shots are needed; `beats` fixes beats per slot for section kinds.
+    With `voices`, one of her lines goes into the intro gap if one fits (else the longest).
     """
     ctx = _series(series)
     analysis = _analysis(song)
     if analysis is None:
         raise ApiError("a song id is needed")
-    candidates = find_candidates(
-        ctx, character, _episodes(ctx, episodes), boost or {}, min_presence
-    )
+    chosen = _episodes(ctx, episodes)
+    candidates = find_candidates(ctx, character, chosen, boost or {}, min_presence)
     if not candidates:
         raise ApiError(f"no kept shots of {character} outside the OP/ED")
     budget = min(len(candidates), max_slots) if max_slots else len(candidates)
@@ -280,6 +292,11 @@ def plan_auto(
         raise ApiError(f"{len(slots)} slots but only {len(candidates)} shots; pick a shorter range")
     plan = draft(name, str(ctx.paths.root), character, analysis.id, slots, candidates)
     refined, _ = refine(plan, analysis, {c.shot.id: c for c in candidates})
+    if voices:
+        picked = _draft_voice(ctx, refined, analysis, chosen, character)
+        if picked is not None:
+            spoken, _ = refine_voices(ctx, replace(refined, voices=[picked]))
+            refined = replace(refined, voices=spoken)
     target = Path(output).expanduser() if output else mad_dir(ctx.paths.root, name) / "plan.json"
     write_plan(refined, target)
     return {
@@ -289,16 +306,48 @@ def plan_auto(
     }
 
 
-def render_plan(
-    plan: str, quality: str = "preview", otio: bool = False, subs: str = "lyrics"
-) -> Json:
+def _ensure_stems(ctx: Context, episodes: Sequence[Episode]) -> None:
+    """Separate the voice of episodes that have not been yet (the `voice` stage, GPU)."""
+    todo = [e for e in episodes if not stage_done(ctx.conn, e.id, voice.NAME)]
+    if todo:
+        voice.run(ctx, todo)
+
+
+def _draft_voice(
+    ctx: Context, plan: Plan, analysis: SongAnalysis, episodes: Sequence[Episode], character: str
+) -> VoicePlan | None:
+    _ensure_stems(ctx, episodes)
+    lines = [x for e in episodes for x in usable_lines(ctx, e)]
+    dialogue = {e.id: list_lines(ctx.conn, e.id, LineKind.DIALOGUE) for e in episodes}
+    return pick_voice(
+        plan,
+        analysis,
+        lines,
+        character,
+        lambda x: voice_bounds(ctx, x.episode, x.line, dialogue[x.episode.id]),
+    )
+
+
+def _voice_stems(ctx: Context, plan: Plan) -> list[tuple[VoicePlan, Path]]:
+    found: dict[str, Episode] = {}
+    for v in plan.voices:
+        episode = find_episode(ctx.conn, v.episode)
+        if episode is None:
+            raise ApiError(f"voice at {v.at:.2f}s: no episode {v.episode!r}")
+        found[v.episode] = episode
+    _ensure_stems(ctx, list(found.values()))
+    return [(v, voice.stem_path(ctx.paths, found[v.episode].id)) for v in plan.voices]
+
+
+def render_plan(plan: str, quality: str = "preview", otio: bool = False, subs: str = "all") -> Json:
     """Render a valid plan (refining missing windows first) into the series' data dir.
 
-    `subs` is "lyrics" (bilingual lyric subtitles burnt in, when the song has lyrics; an
-    editable `lyrics.ass` and `lyrics.srt` are written next to the video either way) or "none".
+    The song is mixed with the plan's voices (`mix.flac`). `subs` is "all" (lyrics and the
+    voices' lines burnt in), "lyrics" (lyrics only) or "none"; an editable `subtitles.ass`
+    and `subtitles.srt` with everything are written next to the video either way.
     """
-    if subs not in ("lyrics", "none"):
-        raise ApiError(f"subs must be lyrics or none, not {subs!r}")
+    if subs not in ("all", "lyrics", "none"):
+        raise ApiError(f"subs must be all, lyrics or none, not {subs!r}")
     parsed = _load_plan(plan)
     report = plan_validate(parsed.to_dict())
     if not report["ok"]:
@@ -310,27 +359,37 @@ def render_plan(
     settings = {"preview": [PREVIEW], "final": [FINAL], "both": [PREVIEW, FINAL]}.get(quality)
     if settings is None:
         raise ApiError(f"quality must be preview, final or both, not {quality!r}")
-    outputs: list[str] = []
+    stems = _voice_stems(ctx, refined)
+    audio = render_audio(refined, analysis, stems, out_dir / "mix.flac")
+    outputs: list[str] = [str(audio)]
     timings: dict[str, float] = {}
     subtitles: tuple[Path, Path] | None = None
-    if analysis.lyrics:
+    spoken = [(v.at, v.end, v.text) for v in refined.voices if v.sub and v.end is not None]
+    if analysis.lyrics or spoken:
         try:
             fonts = prepare_fonts(ctx.paths.data_dir / "fonts")
         except FontError as error:
             raise ApiError(str(error)) from error
-        ass = write_lyrics(
-            out_dir, pair(analysis.lyrics), refined.start, refined.end, fonts, refined.name
-        )
+        pairs = pair(analysis.lyrics)
+        title = refined.name
+        ass = write_subtitles(out_dir, pairs, spoken, refined.start, refined.end, fonts, title)
         if ass is not None:
             outputs += [str(ass), str(ass.with_suffix(".srt"))]
+            if subs != "lyrics":
+                for stale in ("lyrics.ass", "lyrics.srt"):
+                    (out_dir / stale).unlink(missing_ok=True)
             if subs == "lyrics":
+                ass = write_subtitles(
+                    out_dir, pairs, [], refined.start, refined.end, fonts, title, "lyrics"
+                )
+            if subs != "none" and ass is not None:
                 subtitles = (ass, fonts.directory)
     for s in settings:
         start = time.monotonic()
-        outputs.append(str(render(ctx.paths, refined, episodes, analysis, out_dir, s, subtitles)))
+        outputs.append(str(render(ctx.paths, refined, episodes, audio, out_dir, s, subtitles)))
         timings[s.label] = round(time.monotonic() - start, 1)
     if otio:
-        export_timeline(ctx.paths, refined, episodes, analysis, out_dir / "timeline.otio")
+        export_timeline(ctx.paths, refined, episodes, analysis, out_dir / "timeline.otio", stems)
         outputs.append(str(out_dir / "timeline.otio"))
     outputs.append(str(write_report(ctx.paths, refined, analysis.title, out_dir, candidates)))
     return {

@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from tokimeki.library.records import Frame, Rating, Shot, ShotStatus, Tag, TagCategory
+from tokimeki.library.records import Episode, Frame, Rating, Shot, ShotStatus, Tag, TagCategory
 
 _SHOT_COLUMNS = "id, episode_id, idx, start_frame, end_frame, status"
 _FRAME_COLUMNS = "id, shot_id, frame_index, general, sensitive, questionable, explicit"
@@ -51,6 +51,18 @@ def list_shots(
             (episode_id, status.value),
         ).fetchall()
     return [_shot(row) for row in rows]
+
+
+def kept_ranges(conn: sqlite3.Connection, episode: Episode) -> list[tuple[float, float]]:
+    """Seconds covered by kept shots, adjacent shots joined."""
+    joined: list[tuple[float, float]] = []
+    for shot in list_shots(conn, episode.id, ShotStatus.KEPT):
+        start, end = episode.seconds(shot.start_frame), episode.seconds(shot.end_frame)
+        if joined and start - joined[-1][1] < 1e-6:
+            joined[-1] = (joined[-1][0], end)
+        else:
+            joined.append((start, end))
+    return joined
 
 
 def get_shot(conn: sqlite3.Connection, shot_id: int) -> Shot:

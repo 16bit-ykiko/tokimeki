@@ -164,9 +164,21 @@ def cmd_plan_auto(args: argparse.Namespace) -> int:
     span: str | None = args.range
     max_slots: int | None = args.max_slots
     beats = _beats(args.beats)
+    voices: bool = args.voices
     return _emit(
         lambda: api.plan_auto(
-            series, character, song, name, episodes, presence, boost, output, span, max_slots, beats
+            series,
+            character,
+            song,
+            name,
+            episodes,
+            presence,
+            boost,
+            output,
+            span,
+            max_slots,
+            beats,
+            voices,
         )
     )
 
@@ -351,6 +363,9 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--song", required=True, help="song id from `song analyze`")
     auto.add_argument("--name", required=True, help="the MAD's name")
     auto.add_argument("-o", "--output", help="where to write the plan (default: the data dir)")
+    auto.add_argument(
+        "--no-voices", dest="voices", action="store_false", help="no original line in a gap"
+    )
     check = plan_sub.add_parser("validate", help="every problem with a plan; exit 1 on errors")
     check.set_defaults(handler=cmd_plan_validate)
     check.add_argument("plan", help="plan.json")
@@ -367,7 +382,10 @@ def build_parser() -> argparse.ArgumentParser:
     render.set_defaults(quality="preview")
     render.add_argument("--otio", action="store_true", help="also write timeline.otio")
     render.add_argument(
-        "--subs", choices=("lyrics", "none"), default="lyrics", help="burn in lyric subtitles"
+        "--subs",
+        choices=("all", "lyrics", "none"),
+        default="all",
+        help="burn in lyrics and spoken lines, lyrics only, or nothing",
     )
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")

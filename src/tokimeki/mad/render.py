@@ -1,5 +1,5 @@
 """Rendering a plan: each clip on its own with NVDEC and NVENC, cached by its parameters,
-then joined and laid over the song.
+then joined and laid over the mixed sound (the song with the plan's lines over it).
 
 Changing one clip in the plan re-renders only that clip. Previews are small and fast; the
 final render is 1080p.
@@ -8,17 +8,21 @@ final render is 1080p.
 import hashlib
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tokimeki.mad.plan import Plan, SlotPlan
+import numpy as np
+
+from tokimeki.mad.mix import DUCK_DB, RATE, VoiceClip, mix
+from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
+from tokimeki.media.audio import decode_audio, encode_audio
 from tokimeki.media.decode import DecodeError
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.paths import SeriesPaths
 from tokimeki.song.analysis import SongAnalysis
 
 RENDER_VERSION = 1
-AUDIO_FADE = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,17 +140,48 @@ def burn_subtitles(
     script.unlink()
 
 
+def duration(plan: Plan) -> float:
+    return float(sum(slot_frames(plan, s) for s in plan.slots) / plan.frame_rate)
+
+
+def render_audio(
+    plan: Plan, song: SongAnalysis, voices: Sequence[tuple[VoicePlan, Path]], out: Path
+) -> Path:
+    """The MAD's sound: the song excerpt with each voice (taken from its episode's voice stem)
+    mixed over it."""
+    seconds = duration(plan)
+    length = round(seconds * RATE)
+    music = decode_audio(
+        song.source.path,
+        RATE,
+        song.source.stream,
+        start=song.source.offset + plan.start,
+        duration=seconds,
+        channels=2,
+    )
+    music = np.pad(music[:, :length], ((0, 0), (0, max(0, length - music.shape[1]))))
+    clips: list[VoiceClip] = []
+    for v, stem in voices:
+        if v.source_in is None or v.length is None:
+            raise ValueError(f"the voice at {v.at:.2f}s has no in/out; refine the plan")
+        samples = decode_audio(stem, RATE, start=v.source_in, duration=v.length, channels=2)
+        duck = v.duck if v.duck is not None else DUCK_DB
+        clips.append(VoiceClip(v.at - plan.start, samples, v.gain, duck))
+    encode_audio(mix(music, clips), RATE, out)
+    return out
+
+
 def render(
     paths: SeriesPaths,
     plan: Plan,
     episodes: dict[int, str],
-    song: SongAnalysis,
+    audio: Path,
     out_dir: Path,
     settings: RenderSettings,
     subtitles: tuple[Path, Path] | None = None,
 ) -> Path:
     """Render every clip (reusing cached ones), join them, burn in `subtitles` (an ASS file
-    and its fonts directory) if given, and lay the song under them.
+    and its fonts directory) if given, and lay the mixed `audio` under them.
 
     `episodes` maps each slot's shot id to its episode path.
     """
@@ -171,21 +206,15 @@ def render(
         subbed = out_dir / f"{settings.label}.subbed.mp4"
         burn_subtitles(video, subtitles[0], subtitles[1], settings, subbed)
         subbed.replace(video)
-    duration = float(sum(slot_frames(plan, s) for s in plan.slots) / plan.frame_rate)
-    fade = f"afade=t=in:d=0.05,afade=t=out:st={duration - AUDIO_FADE:.3f}:d={AUDIO_FADE}"
-    audio_map = f"1:{song.source.stream}" if song.source.stream is not None else "1:a:0"
     final = out_dir / f"{settings.label}.mp4"
     _ffmpeg(
         [
-            "-i", str(video),
-            "-ss", f"{song.source.offset + plan.start:.6f}", "-t", f"{duration:.6f}",
-            "-i", str(song.source.path),
-            "-map", "0:v", "-map", audio_map, "-map_chapters", "-1", "-map_metadata", "-1",
-            "-c:v", "copy",
-            "-af", fade, "-c:a", "aac", "-b:a", "256k",
-            "-movflags", "+faststart", str(final),
+            "-i", str(video), "-i", str(audio),
+            "-map", "0:v", "-map", "1:a:0", "-map_chapters", "-1", "-map_metadata", "-1",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "256k",
+            "-t", f"{duration(plan):.6f}", "-movflags", "+faststart", str(final),
         ],
-        "adding the song",
+        "adding the sound",
     )  # fmt: skip
     video.unlink()
     listing.unlink()
@@ -193,9 +222,15 @@ def render(
 
 
 def export_timeline(
-    paths: SeriesPaths, plan: Plan, episodes: dict[int, str], song: SongAnalysis, path: Path
+    paths: SeriesPaths,
+    plan: Plan,
+    episodes: dict[int, str],
+    song: SongAnalysis,
+    path: Path,
+    voices: Sequence[tuple[VoicePlan, Path]] = (),
 ) -> None:
-    """An OpenTimelineIO timeline of the cuts, for finishing in an editor (e.g. Resolve)."""
+    """An OpenTimelineIO timeline of the cuts, the song and the voices (from the stems; the
+    ducking is left to the editor), for finishing in an editor (e.g. Resolve)."""
     video = [
         TimelineClip(
             f"{i} {slot.section} - shot {slot.shot}",
@@ -208,5 +243,17 @@ def export_timeline(
         if slot.shot is not None
     ]
     total = sum(slot_frames(plan, s) for s in plan.slots)
-    audio = [TimelineClip(song.title, song.source.path, song.source.offset + plan.start, total)]
-    write_timeline(path, plan.name, float(plan.frame_rate), video, audio)
+    rate = plan.frame_rate
+    music = [TimelineClip(song.title, song.source.path, song.source.offset + plan.start, total)]
+    spoken = [
+        TimelineClip(
+            f"voice {i}: {v.text}",
+            stem,
+            v.source_in,
+            round(v.length * rate),
+            at=round((v.at - plan.start) * rate),
+        )
+        for i, (v, stem) in enumerate(voices)
+        if v.source_in is not None and v.length is not None
+    ]
+    write_timeline(path, plan.name, float(rate), video, [music, spoken] if spoken else [music])

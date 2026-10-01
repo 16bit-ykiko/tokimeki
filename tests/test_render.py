@@ -14,9 +14,9 @@ from test_plan import song
 
 from tokimeki import api
 from tokimeki.mad.fonts import Fonts
-from tokimeki.mad.plan import Plan, SlotPlan
+from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
 from tokimeki.mad.render import PREVIEW, RenderSettings, clip_key, slot_frames
-from tokimeki.mad.subtitles import write_lyrics
+from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.song.analysis import SongSource, save_analysis
 from tokimeki.song.lyrics import LyricLine, pair
@@ -60,12 +60,13 @@ def test_timeline_reads_back(tmp_path: Path) -> None:
         TimelineClip("0 intro", tmp_path / "ep.mkv", 10.0, 48),
         TimelineClip("1 chorus", tmp_path / "ep.mkv", 20.0, 24, 0.95),
     ]
-    audio = [TimelineClip("song", tmp_path / "song.flac", 0.0, 72)]
-    write_timeline(path, "mad", 24.0, video, audio)
+    music = [TimelineClip("song", tmp_path / "song.flac", 0.0, 72)]
+    spoken = [TimelineClip("voice", tmp_path / "voice.flac", 5.0, 12, at=30)]
+    write_timeline(path, "mad", 24.0, video, [music, spoken])
     adapters = importlib.import_module("opentimelineio.adapters")
     read = cast(Callable[[str], _Timeline], adapters.read_from_file)
     assert read(str(path)).duration().to_seconds() == pytest.approx(3.0)
-    assert '"LinearTimeWarp.1"' in path.read_text()
+    assert '"LinearTimeWarp.1"' in path.read_text() and '"Gap.1"' in path.read_text()
 
 
 @pytest.mark.gpu
@@ -91,6 +92,8 @@ def test_render_joins_clips_on_the_beat(tmp_path: Path, monkeypatch: pytest.Monk
     with pytest.raises(api.ApiError, match="errors"):
         api.render_plan(str(_write(tmp_path, plan)), "preview")
     plan = Plan("t", str(root), "", "test-song", [SlotPlan(0.0, 1.25, 2)])
+    plan.voices = [VoicePlan(0.0, episode="ep01.mkv", source_in=1.5, source_out=1.9, text="嗯")]
+    plan.voices[0].force = True
     result = api.render_plan(str(_write(tmp_path, plan)), "preview", otio=True)
     outputs = cast(list[str], result["outputs"])
     video = next(o for o in outputs if o.endswith("preview.mp4"))
@@ -101,7 +104,9 @@ def test_render_joins_clips_on_the_beat(tmp_path: Path, monkeypatch: pytest.Monk
     ).stdout  # fmt: skip
     assert int(frames) == round(1.25 * Fraction(24000, 1001))
     assert any(o.endswith("timeline.otio") for o in outputs)
-    assert any(o.endswith("lyrics.ass") for o in outputs)
+    assert any(o.endswith("mix.flac") for o in outputs)
+    ass = next(o for o in outputs if o.endswith("subtitles.ass"))
+    assert "「嗯」" in Path(ass).read_text(encoding="utf-8-sig")
     assert (root / ".tokimeki/mads/t/report.html").exists()
 
 
@@ -111,21 +116,20 @@ def _write(tmp_path: Path, plan: Plan) -> Path:
     return path
 
 
-def test_lyrics_become_bilingual_ass_and_srt(tmp_path: Path) -> None:
+def test_lyrics_and_lines_become_ass_and_srt(tmp_path: Path) -> None:
     pairs = pair(
         [LyricLine(8.1, 10.8, "信じてね", "ja"), LyricLine(8.1, 10.8, "相信我", "zh"),
          LyricLine(30.0, 33.0, "外", "ja")]
     )  # fmt: skip
     fonts = Fonts("Yu Gothic", "Microsoft YaHei", tmp_path)
-    ass = write_lyrics(tmp_path, pairs, 5.0, 20.0, fonts, "t")
-    assert ass is not None
+    ass = write_subtitles(tmp_path, pairs, [(6.0, 7.5, "等一下")], 5.0, 20.0, fonts, "t")
+    assert ass is not None and ass.name == "subtitles.ass"
     text = ass.read_text(encoding="utf-8-sig")
     assert "Style: ja,Yu Gothic,60" in text and "Style: zh,Microsoft YaHei,42" in text
     assert "Dialogue: 0,0:00:03.10,0:00:05.80,ja,,0,0,0,,{\\fad(150,220)}信じてね" in text
+    assert "Style: line,Microsoft YaHei,46,&H00C8F0FF" in text
+    assert "Dialogue: 1,0:00:01.00,0:00:02.50,line,,0,0,0,,{\\fad(100,160)}「等一下」" in text
     assert "外" not in text
-    assert (
-        (tmp_path / "lyrics.srt")
-        .read_text()
-        .startswith("1\n00:00:03,100 --> 00:00:05,800\n信じてね\n相信我")
-    )
-    assert write_lyrics(tmp_path, pairs, 40.0, 50.0, fonts, "t") is None
+    srt = (tmp_path / "subtitles.srt").read_text()
+    assert srt.startswith("1\n00:00:01,000 --> 00:00:02,500\n「等一下」\n\n2\n00:00:03,100")
+    assert write_subtitles(tmp_path, pairs, [], 40.0, 50.0, fonts, "t") is None
