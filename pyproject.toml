@@ -41,14 +41,7 @@ rotary-embedding-torch = "*"
 [tool.pixi.feature.gpu.pypi-dependencies]
 transnetv2-pytorch = "==1.0.5"
 silero-vad = "==6.2.3"
-beat-this = "==1.1.0"
 opentimelineio = "==0.18.1"
-
-# beat-this wants torchaudio (and soxr) only for audio loading and its mel front end, which
-# models/beats.py replaces; conda-forge has no torchaudio for this PyTorch.
-[tool.pixi.pypi-options.dependency-overrides]
-torchaudio = { version = ">=0", env-markers = "sys_platform == 'never'" }
-soxr = { version = ">=0", env-markers = "sys_platform == 'never'" }
 
 # Type checking needs PyTorch's annotations, not its CUDA libraries; CI runners have no GPU.
 [tool.pixi.feature.typing.dependencies]
@@ -74,6 +67,8 @@ check = { depends-on = ["lint", "format-check", "typecheck"] }
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored third-party code, kept as published (see its __init__.py).
+extend-exclude = ["src/tokimeki/models/beat_this"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
@@ -81,6 +76,8 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
 [tool.basedpyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
+# Vendored third-party code, untyped; models/beats.py is its typed wrapper.
+exclude = ["src/tokimeki/models/beat_this", "**/.*", "**/__pycache__"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

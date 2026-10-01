@@ -1,7 +1,7 @@
 """Beat This! (CPJKU) beat and downbeat tracking on CUDA.
 
-Only the network comes from the `beat-this` package. Its audio loading and mel front end
-need torchaudio, which conda-forge does not build for this PyTorch, so the log-mel
+Only the network comes from Beat This! (vendored in `models/beat_this`). Its audio loading
+and mel front end need torchaudio, which conda-forge does not build for this PyTorch, so the log-mel
 spectrogram (the same as torchaudio's `MelSpectrogram` with the model's settings), the
 chunked inference and the "minimal" peak picking are reimplemented here.
 """
@@ -119,7 +119,7 @@ def snap_downbeats(
 
 
 def _network(device: torch.device) -> torch.nn.Module:
-    module = importlib.import_module("beat_this.model.beat_tracker")
+    module = importlib.import_module("tokimeki.models.beat_this.beat_tracker")
     factory = cast(Callable[..., torch.nn.Module], module.BeatThis)
     checkpoint = cast(
         dict[str, dict[str, object]],
