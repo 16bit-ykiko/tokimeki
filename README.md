@@ -117,6 +117,8 @@ Weights come from the Hugging Face Hub on first use (into the HF cache); the cod
 | Content filter, tags | WD14 SwinV2 v3 (`SmilingWolf/wd-swinv2-tagger-v3`) | onnxruntime, CUDA |
 | Faces | `deepghs/anime_face_detection`, `face_detect_v1.4_s` (YOLOv8) | onnxruntime, CUDA |
 | Characters | `deepghs/ccip_onnx`, `ccip-caformer-24-randaug-pruned` | onnxruntime, CUDA |
+| Subtitle timing | Silero VAD 6 (sequence ONNX from the `silero-vad` package) | onnxruntime, CUDA |
+| Beats | Beat This! `final0` (network vendored in `models/beat_this`, MIT) | PyTorch, CUDA |
 
 The deepghs and WD14 ONNX files are wrapped directly instead of going through `dghs-imgutils`, the library they were published with:
 
@@ -142,3 +144,4 @@ pixi run test                 # GPU tests are skipped where there is no GPU
 - Nothing heavy falls back to the CPU: without NVDEC or CUDA the pipeline stops with an error. CPU thread pools are kept small (`models.CPU_THREADS`).
 - One model is on the GPU at a time and may use at most `GPU_MEMORY_LIMIT` (4 GiB, `models/gpu.py`). Past the card's memory the Windows driver pages to system RAM and everything crawls; the cap turns that into an error. Setting *CUDA – Sysmem Fallback Policy* to *Prefer No Sysmem Fallback* in the NVIDIA Control Panel does the same driver-wide.
 - CI type-checks in the small `lint` environment (CPU PyTorch: same annotations, no CUDA libraries).
+- Beat This!'s PyPI package needs torchaudio, which conda-forge does not build for this PyTorch, and pixi's lock check rejects overrides that drop a dependency; so its two network files are vendored (`models/beat_this`, excluded from lint and type checks) and its mel front end is reimplemented in `models/beats.py` (matches torchaudio to 2e-5, tested).
