@@ -6,7 +6,7 @@ Stage 1 is a **scene library**: give it the episodes of a series, get back every
 
 The aim is an AI rough cut you refine, not a finished video with no human in the loop. What makes a good MAD (cuts on the beat, picture answering the lyrics, pacing) comes from that loop.
 
-First series: _To LOVE-Ru Darkness_, seasons 1–2 (24 episodes).
+First series: _To LOVE-Ru Darkness_ and _Darkness 2nd_ (12 + 14 = 26 episodes).
 
 ## Stage 1: scene library
 
