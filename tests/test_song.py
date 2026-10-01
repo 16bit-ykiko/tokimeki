@@ -16,8 +16,9 @@ from tokimeki.models.beats import (
 )
 from tokimeki.models.separation import CHUNK, N_FFT, VocalSeparator, band_mask, mdx_input
 from tokimeki.models.separation import FPS as SEPARATION_FPS
-from tokimeki.song.analysis import SongSource, assemble, lyrics_share, song_id
-from tokimeki.song.lyrics import LyricLine, parse_lrc
+from tokimeki.song.analysis import SongSource, assemble, lyrics_share, refrain_bars, song_id
+from tokimeki.song.bounds import song_bounds
+from tokimeki.song.lyrics import LyricLine, LyricSource, pair, parse_lrc, read_lyrics
 from tokimeki.song.slots import Excerpt, first_chorus, make_slots
 from tokimeki.song.structure import (
     Section,
@@ -154,12 +155,12 @@ def test_slots_slow_down_to_fit_the_shots() -> None:
     sections = [_section("intro", 0, 8), _section("verse", 8, 24), _section("chorus", 24, 40)]
     beats = [float(b) for b in np.arange(0, 40, 0.5)]
     excerpt = Excerpt(0, 40, sections)
-    fast = make_slots(beats, 120.0, excerpt, 100)
+    fast = make_slots(beats, beats[::4], 120.0, excerpt, 100)
     assert len(fast) == 4 + 8 + 16
-    fitted = make_slots(beats, 120.0, excerpt, 22)
+    fitted = make_slots(beats, beats[::4], 120.0, excerpt, 22)
     assert {s.section: s.beats for s in fitted} == {"intro": 8, "verse": 8, "chorus": 2}
     assert len(fitted) == 22
-    tight = make_slots(beats, 120.0, excerpt, 20)
+    tight = make_slots(beats, beats[::4], 120.0, excerpt, 20)
     assert {s.section: s.beats for s in tight}["chorus"] == 4
     assert tight[0].start == 0 and tight[-1].end == 40
     assert all(b.start == a.end for a, b in pairwise(tight))
@@ -243,3 +244,60 @@ def test_vocal_separator_runs_on_the_gpu() -> None:
     finally:
         separator.close()
     assert len(share) == int(np.ceil(44100 * 3 / 1024))
+
+
+def test_lyric_sources_parse_styles_and_language() -> None:
+    src = LyricSource.parse("/a b/ep01 [01].ass#opjp,OPJP2@ja")
+    assert (src.path, src.styles, src.lang) == (Path("/a b/ep01 [01].ass"), ("opjp", "OPJP2"), "ja")
+    assert LyricSource.parse("song.lrc").styles == () and LyricSource.parse("x.lrc@zh").lang == "zh"
+
+
+def test_ass_lyrics_move_onto_the_song_clock(tmp_path: Path) -> None:
+    ass = tmp_path / "ep.ass"
+    ass.write_text(
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Actor, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:20:39.16,0:20:41.85,opjp,NTP,0,0,0,,{\\fad(100,100)}信じてね\n"
+        "Dialogue: 0,0:20:39.16,0:20:41.85,opcn,NTP,0,0,0,,相信我\n"
+        "Dialogue: 0,0:20:40.00,0:20:41.00,*Default,NTP,0,0,0,,台词\n",
+        encoding="utf-8",
+    )
+    (ja,) = read_lyrics(LyricSource(ass, ("opjp",), "ja"), offset=1231.05)
+    assert (ja.start, ja.end, ja.text, ja.lang) == (
+        pytest.approx(8.11),
+        pytest.approx(10.8),
+        "信じてね",
+        "ja",
+    )
+    zh = read_lyrics(LyricSource(ass, ("opcn",), "zh"), offset=1231.05)
+    (both,) = pair([ja, *zh])
+    assert both.texts == {"ja": "信じてね", "zh": "相信我"}
+
+
+def test_repeated_lyrics_mark_the_refrain() -> None:
+    lines = [
+        LyricLine(2.0, 4.0, "信じてね　わたしを"),
+        LyricLine(4.0, 6.0, "止まらない"),
+        LyricLine(8.0, 10.0, "信じてね わたしを"),
+    ]
+    marks = refrain_bars(lines, np.arange(0, 12, 2.0), 12.0)
+    assert marks is not None and marks.tolist() == [False, True, False, False, True, False]
+    assert refrain_bars([LyricLine(0, 1, "a")], np.arange(0, 4, 2.0), 4.0) is None
+
+
+def test_song_bounds_find_the_attack_and_the_silence() -> None:
+    rate = 1000
+    rng = np.random.default_rng(0)
+    fading = rng.normal(0, 1, 3 * rate) * np.linspace(0.3, 0.003, 3 * rate)
+    song = rng.normal(0, 0.5, 10 * rate)
+    silence = np.zeros(2 * rate)
+    samples = np.concatenate([fading, song, silence]).astype(np.float32)
+    start, end = song_bounds(samples, rate, 100.0, 104.0, 112.0)
+    assert start == pytest.approx(103.0, abs=0.02) and end == pytest.approx(113.0, abs=0.02)
+
+
+def test_a_pickup_opens_its_own_slot() -> None:
+    beats = [0.0, 0.5, *[1.0 + 0.5 * i for i in range(16)]]
+    sections = [_section("intro", 0.0, 9.0)]
+    slots = make_slots(beats, beats[2::4], 120.0, Excerpt(0.0, 9.0, sections), 100)
+    assert [(s.start, s.end) for s in slots[:3]] == [(0.0, 1.0), (1.0, 3.0), (3.0, 5.0)]

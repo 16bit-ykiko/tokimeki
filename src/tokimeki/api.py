@@ -17,10 +17,12 @@ from tokimeki.library.shots import get_shot
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
+from tokimeki.mad.fonts import FontError, prepare_fonts
 from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, mad_dir, write_plan
 from tokimeki.mad.refine import refine
 from tokimeki.mad.render import FINAL, PREVIEW, export_timeline, render
 from tokimeki.mad.report import write_report
+from tokimeki.mad.subtitles import write_lyrics
 from tokimeki.mad.validate import Issue, validate
 from tokimeki.song.analysis import (
     SongAnalysis,
@@ -29,6 +31,7 @@ from tokimeki.song.analysis import (
     load_analysis,
     suggested_slots,
 )
+from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages.base import Context, open_series, register_episodes
 
 type Json = dict[str, object]
@@ -68,25 +71,35 @@ def _song_json(analysis: SongAnalysis) -> Json:
 def song_analyze(
     audio: str,
     track: int | None = None,
-    lyrics: str | None = None,
+    lyrics: Sequence[str] = (),
     instrumental: str | None = None,
     span: str | None = None,
     instrumental_track: int | None = None,
+    stream: int | None = None,
+    within: str | None = None,
+    title: str | None = None,
 ) -> Json:
-    """Beats, bars, sections, energy, the excerpt and suggested slots of a song; stored.
+    """Beats, bars, sections, energy, lyrics, the excerpt and suggested slots of a song; stored.
 
-    The vocal line comes from separating the mix; lyrics or an instrumental are optional hints.
+    `audio` is any media file: an audio file, a `.cue` image (`track`), or e.g. an episode
+    with `within` a rough window around the song (its exact edges are found from the audio)
+    on `stream`. `lyrics` are `PATH[#STYLE,STYLE][@LANG]` specs (LRC, or ASS lines of those
+    styles on the media's clock). The vocal line comes from the first lyrics, else an
+    instrumental hint, else from separating the mix. `span` picks the excerpt.
     """
     try:
         analysis = analyse_song(
             Path(audio).expanduser(),
             track,
-            Path(lyrics).expanduser() if lyrics else None,
+            [LyricSource.parse(x) for x in lyrics],
             Path(instrumental).expanduser() if instrumental else None,
             parse_range(span) if span else None,
             instrumental_track,
+            stream,
+            parse_range(within) if within else None,
+            title,
         )
-    except SongError as error:
+    except (SongError, OSError, ValueError) as error:
         raise ApiError(str(error)) from error
     return _song_json(analysis)
 
@@ -253,8 +266,16 @@ def plan_auto(
     }
 
 
-def render_plan(plan: str, quality: str = "preview", otio: bool = False) -> Json:
-    """Render a valid plan (refining missing windows first) into the series' data dir."""
+def render_plan(
+    plan: str, quality: str = "preview", otio: bool = False, subs: str = "lyrics"
+) -> Json:
+    """Render a valid plan (refining missing windows first) into the series' data dir.
+
+    `subs` is "lyrics" (bilingual lyric subtitles burnt in, when the song has lyrics; an
+    editable `lyrics.ass` and `lyrics.srt` are written next to the video either way) or "none".
+    """
+    if subs not in ("lyrics", "none"):
+        raise ApiError(f"subs must be lyrics or none, not {subs!r}")
     parsed = _load_plan(plan)
     report = plan_validate(parsed.to_dict())
     if not report["ok"]:
@@ -268,9 +289,22 @@ def render_plan(plan: str, quality: str = "preview", otio: bool = False) -> Json
         raise ApiError(f"quality must be preview, final or both, not {quality!r}")
     outputs: list[str] = []
     timings: dict[str, float] = {}
+    subtitles: tuple[Path, Path] | None = None
+    if analysis.lyrics:
+        try:
+            fonts = prepare_fonts(ctx.paths.data_dir / "fonts")
+        except FontError as error:
+            raise ApiError(str(error)) from error
+        ass = write_lyrics(
+            out_dir, pair(analysis.lyrics), refined.start, refined.end, fonts, refined.name
+        )
+        if ass is not None:
+            outputs += [str(ass), str(ass.with_suffix(".srt"))]
+            if subs == "lyrics":
+                subtitles = (ass, fonts.directory)
     for s in settings:
         start = time.monotonic()
-        outputs.append(str(render(ctx.paths, refined, episodes, analysis, out_dir, s)))
+        outputs.append(str(render(ctx.paths, refined, episodes, analysis, out_dir, s, subtitles)))
         timings[s.label] = round(time.monotonic() - start, 1)
     if otio:
         export_timeline(ctx.paths, refined, episodes, analysis, out_dir / "timeline.otio")

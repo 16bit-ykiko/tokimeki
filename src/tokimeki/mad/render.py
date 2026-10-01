@@ -100,6 +100,42 @@ def render_clip(
     partial.replace(out)
 
 
+def _filter_path(path: Path) -> str:
+    """A path quoted for an ffmpeg filter argument."""
+    escaped = str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    return f"'{escaped}'"
+
+
+def burn_subtitles(
+    video: Path, subtitles: Path, fonts: Path, settings: RenderSettings, out: Path
+) -> None:
+    """Draw an ASS file onto a video: NVDEC in, libass on the CPU, NVENC out."""
+    chain = ",".join(
+        [
+            "hwdownload",
+            "format=nv12",
+            "format=yuv420p",
+            f"subtitles=filename={_filter_path(subtitles)}:fontsdir={_filter_path(fonts)}",
+            "format=nv12",
+            "hwupload_cuda",
+        ]
+    )
+    script = out.with_suffix(".filter.txt")
+    script.write_text(chain, encoding="utf-8")
+    _ffmpeg(
+        [
+            "-threads", "1", "-filter_threads", "1",
+            "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", str(video),
+            "-/vf", str(script), "-map_chapters", "-1",
+            "-c:v", "h264_nvenc", "-preset", settings.preset, "-rc", "vbr",
+            "-cq", str(settings.quality), "-b:v", "0", "-g", "48", "-bf", "0",
+            str(out),
+        ],
+        "burning in the subtitles",
+    )  # fmt: skip
+    script.unlink()
+
+
 def render(
     paths: SeriesPaths,
     plan: Plan,
@@ -107,8 +143,10 @@ def render(
     song: SongAnalysis,
     out_dir: Path,
     settings: RenderSettings,
+    subtitles: tuple[Path, Path] | None = None,
 ) -> Path:
-    """Render every clip (reusing cached ones), join them and lay the song under them.
+    """Render every clip (reusing cached ones), join them, burn in `subtitles` (an ASS file
+    and its fonts directory) if given, and lay the song under them.
 
     `episodes` maps each slot's shot id to its episode path.
     """
@@ -129,15 +167,21 @@ def render(
     listing.write_text("".join(f"file '{p}'\n" for p in rendered), encoding="utf-8")
     video = out_dir / f"{settings.label}.video.mp4"
     _ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video)], "joining")
+    if subtitles is not None:
+        subbed = out_dir / f"{settings.label}.subbed.mp4"
+        burn_subtitles(video, subtitles[0], subtitles[1], settings, subbed)
+        subbed.replace(video)
     duration = float(sum(slot_frames(plan, s) for s in plan.slots) / plan.frame_rate)
     fade = f"afade=t=in:d=0.05,afade=t=out:st={duration - AUDIO_FADE:.3f}:d={AUDIO_FADE}"
+    audio_map = f"1:{song.source.stream}" if song.source.stream is not None else "1:a:0"
     final = out_dir / f"{settings.label}.mp4"
     _ffmpeg(
         [
             "-i", str(video),
             "-ss", f"{song.source.offset + plan.start:.6f}", "-t", f"{duration:.6f}",
             "-i", str(song.source.path),
-            "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+            "-map", "0:v", "-map", audio_map, "-map_chapters", "-1", "-map_metadata", "-1",
+            "-c:v", "copy",
             "-af", fade, "-c:a", "aac", "-b:a", "256k",
             "-movflags", "+faststart", str(final),
         ],

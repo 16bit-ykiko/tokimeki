@@ -12,6 +12,7 @@ from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
 from tokimeki.song.analysis import SongAnalysis
+from tokimeki.song.lyrics import pair
 from tokimeki.song.slots import excerpt_between, make_slots
 from tokimeki.stages.base import Context
 from tokimeki.stages.scenes import summaries
@@ -52,7 +53,7 @@ def _song(analysis: SongAnalysis, budget: int) -> Json:
     excerpt = excerpt_between(
         analysis.bars, analysis.source.duration, analysis.sections, start, end
     )
-    fitted = make_slots(analysis.beats, analysis.bpm, excerpt, budget)
+    fitted = make_slots(analysis.beats, analysis.bars, analysis.bpm, excerpt, budget)
     return {
         "id": analysis.id,
         "title": analysis.title,
@@ -65,7 +66,11 @@ def _song(analysis: SongAnalysis, budget: int) -> Json:
             for s in analysis.sections
         ],
         "beats": [_r(b, 3) for b in analysis.beats if start - 1e-6 <= b <= end + 1e-6],
-        "lyrics": [[_r(x.start), x.text] for x in analysis.lyrics if start <= x.start < end],
+        "lyrics": [
+            {"start": _r(p.start), "end": _r(p.end), **p.texts}
+            for p in pair(analysis.lyrics)
+            if start - 1e-6 <= p.start < end
+        ],
         "slots": [
             {"start": _r(s.start, 3), "end": _r(s.end, 3), "section": s.section, "beats": s.beats}
             for s in fitted

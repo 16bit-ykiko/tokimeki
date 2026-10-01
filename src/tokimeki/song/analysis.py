@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from itertools import pairwise
 from pathlib import Path
@@ -21,7 +22,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
-from tokimeki.media.audio import decode_audio
+from tokimeki.media.audio import audio_streams, decode_audio, main_audio
 from tokimeki.media.cue import read_cue
 from tokimeki.models.beats import FPS, SAMPLE_RATE, Beats, BeatTracker, mel_centres
 from tokimeki.models.gpu import loaded
@@ -29,13 +30,14 @@ from tokimeki.models.separation import FPS as SEPARATION_FPS
 from tokimeki.models.separation import MODEL_FILE as SEPARATION_MODEL
 from tokimeki.models.separation import SAMPLE_RATE as SEPARATION_RATE
 from tokimeki.models.separation import VocalSeparator
-from tokimeki.song import structure
-from tokimeki.song.lyrics import LyricLine, read_lrc
+from tokimeki.song import bounds, structure
+from tokimeki.song.lyrics import LyricLine, LyricSource, read_lyrics
 from tokimeki.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
 from tokimeki.song.structure import Section
 
 ANALYSIS_VERSION = 2
 UNLIMITED = 1_000_000
+BOUNDS_RATE = 16000
 
 type Json = dict[str, object]
 
@@ -53,6 +55,8 @@ class SongSource:
     duration: float
     title: str
     track: int | None = None
+    stream: int | None = None
+    """The audio stream of a file with several (an episode's main track, not commentary)."""
 
 
 @dataclass
@@ -98,6 +102,7 @@ class SongAnalysis:
                 _float(src["duration"]),
                 str(src["title"]),
                 cast(int | None, src.get("track")),
+                cast(int | None, src.get("stream")),
             ),
             bpm=_float(d["bpm"]),
             beats=cast(list[float], d["beats"]),
@@ -135,7 +140,7 @@ def _section(d: Json) -> Section:
 
 
 def _lyric(d: Json) -> LyricLine:
-    return LyricLine(_float(d["start"]), _float(d["end"]), str(d["text"]))
+    return LyricLine(_float(d["start"]), _float(d["end"]), str(d["text"]), str(d.get("lang", "")))
 
 
 def _slot(d: Json) -> Slot:
@@ -176,30 +181,53 @@ def _probe(path: Path) -> tuple[float, str]:
     return float(str(fmt.get("duration", "0"))), title
 
 
-def resolve(path: Path, track: int | None = None) -> SongSource:
-    """The song at `path`: an audio file, or a track (default 1) of a `.cue` CD image."""
+def resolve(
+    path: Path,
+    track: int | None = None,
+    stream: int | None = None,
+    within: tuple[float, float] | None = None,
+    title: str | None = None,
+) -> SongSource:
+    """The song at `path`: an audio file, a track of a `.cue` CD image, or the stretch of any
+    media file roughly `within` a window (its exact start and end found from the audio), on
+    `stream` (default: the programme audio, never commentary)."""
     if not path.exists():
         raise SongError(f"{path} does not exist")
-    if path.suffix.lower() != ".cue":
-        duration, title = _probe(path)
-        return SongSource(path, 0.0, duration, title or path.stem)
-    sheet = read_cue(path)
-    total, _ = _probe(sheet.file)
-    t = sheet.track(track or 1)
-    end = t.end if t.end is not None else total
-    return SongSource(sheet.file, t.start, end - t.start, t.title, t.number)
+    if path.suffix.lower() == ".cue":
+        sheet = read_cue(path)
+        total, _ = _probe(sheet.file)
+        t = sheet.track(track or 1)
+        end = t.end if t.end is not None else total
+        return SongSource(sheet.file, t.start, end - t.start, title or t.title, t.number)
+    duration, tag_title = _probe(path)
+    if stream is None:
+        streams = audio_streams(path)
+        stream = main_audio(path).index if len(streams) > 1 else None
+    name = title or (path.stem if within else tag_title or path.stem)
+    if within is None:
+        return SongSource(path, 0.0, duration, name, stream=stream)
+    start, end = within
+    if not 0 <= start < end <= duration:
+        raise SongError(f"window {start:.1f}-{end:.1f}s is outside {path.name} (0-{duration:.1f}s)")
+    lead = max(0.0, start - bounds.SEARCH_BEFORE - 2)
+    tail = min(duration, end + bounds.SEARCH_BEFORE + 2)
+    samples = decode_audio(path, BOUNDS_RATE, stream, start=lead, duration=tail - lead)
+    first, last = bounds.song_bounds(samples, BOUNDS_RATE, lead, start, end)
+    return SongSource(path, round(first, 3), round(last - first, 3), name, stream=stream)
 
 
 def song_id(source: SongSource) -> str:
     """A readable, stable id: the title's ASCII words and a hash of where the audio is."""
     words = re.findall(r"[a-z0-9]+", source.title.lower())
     slug = "-".join(words)[:40] or "song"
-    key = f"{source.path.resolve()}|{source.track}|{source.offset:.3f}"
+    key = f"{source.path.resolve()}|{source.track}|{source.stream}|{source.offset:.3f}"
     return f"{slug}-{hashlib.sha1(key.encode()).hexdigest()[:8]}"
 
 
 def _audio(source: SongSource) -> NDArray[np.float32]:
-    return decode_audio(source.path, SAMPLE_RATE, start=source.offset, duration=source.duration)
+    return decode_audio(
+        source.path, SAMPLE_RATE, source.stream, start=source.offset, duration=source.duration
+    )
 
 
 def lyrics_share(
@@ -216,6 +244,25 @@ def lyrics_share(
 SUNG = {"lyrics": 0.2, "instrumental": 0.2, "separation": 0.3}
 """Per source of the vocal line, the share of a bar that makes it sung. Separation's scale
 differs: 0.3 matched the instrumental-derived line on 95.5% of MORE&MORE's bars."""
+
+
+def refrain_bars(
+    lyrics: list[LyricLine], bars: NDArray[np.float64], end: float
+) -> NDArray[np.bool_] | None:
+    """Bars at least a third covered by lyric lines that are sung more than once."""
+    if not lyrics:
+        return None
+
+    def key(text: str) -> str:
+        return re.sub(r"[\s\W_]+", "", text.lower())
+
+    counts: dict[str, int] = {}
+    for line in lyrics:
+        counts[key(line.text)] = counts.get(key(line.text), 0) + 1
+    repeated = [x for x in lyrics if counts[key(x.text)] > 1]
+    if not repeated:
+        return None
+    return lyrics_share(repeated, bars, end) >= 1 / 3
 
 
 def vocal_line(
@@ -260,7 +307,8 @@ def assemble(
     sung_at = SUNG.get(vocal_source, structure.VOCAL_ON)
     loudness = structure.per_bar(mix.mean(axis=1, keepdims=True), FPS, bars, end)[:, 0]
     features = structure.per_bar(mix, FPS, bars, end)
-    starts = structure.boundaries(structure.novelty(features), shares >= sung_at)
+    refrain = refrain_bars(lyrics, bars, end)
+    starts = structure.boundaries(structure.novelty(features), shares >= sung_at, refrain=refrain)
     sections = structure.merge_runs(
         structure.label_sections(
             starts,
@@ -271,8 +319,11 @@ def assemble(
             end,
             vocal_known=vocal is not None,
             vocal_on=sung_at,
+            refrain=refrain,
         )
     )
+    if len(beats.beats) and sections and beats.beats[0] < sections[0].start - 1e-6:
+        sections[0] = replace(sections[0], start=float(beats.beats[0]))
     intervals = np.diff(beats.beats)
     return SongAnalysis(
         id=song_id(source),
@@ -306,6 +357,7 @@ def measure(
         stereo = decode_audio(
             source.path,
             SEPARATION_RATE,
+            source.stream,
             start=source.offset,
             duration=source.duration,
             channels=2,
@@ -333,24 +385,28 @@ def suggested_slots(analysis: SongAnalysis, budget: int = UNLIMITED) -> list[Slo
     excerpt = excerpt_between(
         analysis.bars, analysis.source.duration, analysis.sections, start, end
     )
-    return make_slots(analysis.beats, analysis.bpm, excerpt, budget)
+    return make_slots(analysis.beats, analysis.bars, analysis.bpm, excerpt, budget)
 
 
 def analyse_song(
     path: Path,
     track: int | None = None,
-    lyrics: Path | None = None,
+    lyrics: Sequence[LyricSource] = (),
     instrumental: Path | None = None,
     span: tuple[float, float] | None = None,
     instrumental_track: int | None = None,
+    stream: int | None = None,
+    within: tuple[float, float] | None = None,
+    title: str | None = None,
 ) -> SongAnalysis:
     """Analyse a song (reusing the stored beats and sections when their inputs match), pick
-    its excerpt (`span`, or the top through the first chorus) and store the result.
+    its excerpt (`span`; by default the whole song when it is short, else the top through
+    the first chorus) and store the result.
 
-    The vocal line comes from separating the mix unless lyrics or an instrumental (a file,
-    or `instrumental_track` of the same `.cue`) are given as hints.
+    The vocal line comes from the first lyrics source if any, else an instrumental (a file,
+    or `instrumental_track` of the same `.cue`), else from separating the mix.
     """
-    source = resolve(path, track)
+    source = resolve(path, track, stream, within, title)
     backing: SongSource | None = None
     if instrumental is not None:
         backing = resolve(instrumental)
@@ -359,10 +415,16 @@ def analyse_song(
             raise SongError("--instrumental-track needs a .cue sheet")
         backing = resolve(path, instrumental_track)
     inputs = {
-        "lyrics": f"{lyrics.resolve()}@{lyrics.stat().st_mtime_ns}" if lyrics else "",
+        "lyrics": " ".join(x.key() for x in lyrics),
         "instrumental": f"{backing.path.resolve()}|{backing.offset:.3f}" if backing else "",
         "separation": SEPARATION_MODEL,
     }
+    lines = [
+        line
+        for src in lyrics
+        for line in read_lyrics(src, source.offset)
+        if line.end > 0 and line.start < source.duration
+    ]
     sid = song_id(source)
     analysis: SongAnalysis | None = None
     if analysis_path(sid).exists():
@@ -372,8 +434,8 @@ def analyse_song(
         except SongError:
             analysis = None
     if analysis is None:
-        lines = read_lrc(lyrics) if lyrics is not None else []
-        analysis = replace(measure(source, backing, lines), inputs=inputs)
+        first_language = [x for x in lines if not lyrics or x.lang == lyrics[0].lang]
+        analysis = replace(measure(source, backing, first_language), lyrics=lines, inputs=inputs)
     excerpt = excerpt_of(analysis, span)
     analysis = replace(analysis, excerpt=(excerpt.start, excerpt.end))
     analysis = replace(analysis, slots=suggested_slots(analysis))

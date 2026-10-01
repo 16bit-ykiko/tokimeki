@@ -108,11 +108,18 @@ def _boosts(values: list[str] | None) -> dict[str, float]:
 def cmd_song_analyze(args: argparse.Namespace) -> int:
     audio: str = args.audio
     track: int | None = args.track
-    lyrics: str | None = args.lyrics
+    lyrics: list[str] = args.lyrics or []
     instrumental: str | None = args.instrumental
     span: str | None = args.range
     backing_track: int | None = args.instrumental_track
-    return _emit(lambda: api.song_analyze(audio, track, lyrics, instrumental, span, backing_track))
+    stream: int | None = args.stream
+    within: str | None = args.within
+    title: str | None = args.title
+    return _emit(
+        lambda: api.song_analyze(
+            audio, track, lyrics, instrumental, span, backing_track, stream, within, title
+        )
+    )
 
 
 def cmd_song_show(args: argparse.Namespace) -> int:
@@ -171,7 +178,8 @@ def cmd_render(args: argparse.Namespace) -> int:
     plan: str = args.plan
     quality: str = args.quality
     otio: bool = args.otio
-    return _emit(lambda: api.render_plan(plan, quality, otio))
+    subs: str = args.subs
+    return _emit(lambda: api.render_plan(plan, quality, otio, subs))
 
 
 def cmd_cast_list(args: argparse.Namespace) -> int:
@@ -248,9 +256,18 @@ def build_parser() -> argparse.ArgumentParser:
     song_sub = song.add_subparsers(required=True, metavar="action")
     analyze = song_sub.add_parser("analyze", help="beats, bars, sections, energy, excerpt, slots")
     analyze.set_defaults(handler=cmd_song_analyze)
-    analyze.add_argument("audio", help="any audio file (a .cue picks a track of a CD image)")
+    analyze.add_argument("audio", help="any media file: audio, a .cue image, an episode …")
     analyze.add_argument("--track", type=int, help="track of a .cue sheet (default 1)")
-    analyze.add_argument("--lyrics", help="hint: an LRC file, for the vocal line and lyric times")
+    analyze.add_argument(
+        "--within", help="rough window of the song in the file, e.g. 20:37-21:58; edges found"
+    )
+    analyze.add_argument("--stream", type=int, help="audio stream index (default: main track)")
+    analyze.add_argument("--title", help="the song's title (default: from the file)")
+    analyze.add_argument(
+        "--lyrics",
+        action="append",
+        help="PATH[#STYLE,STYLE][@LANG]: LRC, or ASS lines of those styles (repeatable)",
+    )
     analyze.add_argument(
         "--instrumental", help="hint: the song without vocals (default: separate the mix)"
     )
@@ -295,6 +312,9 @@ def build_parser() -> argparse.ArgumentParser:
         quality.add_argument(f"--{q}", dest="quality", action="store_const", const=q)
     render.set_defaults(quality="preview")
     render.add_argument("--otio", action="store_true", help="also write timeline.otio")
+    render.add_argument(
+        "--subs", choices=("lyrics", "none"), default="lyrics", help="burn in lyric subtitles"
+    )
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")

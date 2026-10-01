@@ -13,10 +13,13 @@ from clips import make_clip
 from test_plan import song
 
 from tokimeki import api
+from tokimeki.mad.fonts import Fonts
 from tokimeki.mad.plan import Plan, SlotPlan
 from tokimeki.mad.render import PREVIEW, RenderSettings, clip_key, slot_frames
+from tokimeki.mad.subtitles import write_lyrics
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.song.analysis import SongSource, save_analysis
+from tokimeki.song.lyrics import LyricLine, pair
 from tokimeki.stages import pipeline
 from tokimeki.stages.base import open_series, register_episodes
 
@@ -78,7 +81,10 @@ def test_render_joins_clips_on_the_beat(tmp_path: Path, monkeypatch: pytest.Monk
     subprocess.run(
         ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=3", str(audio)], check=True
     )
-    save_analysis(replace(song(0.25, 3.0), source=SongSource(audio, 0.0, 3.0, "Test")))
+    lyrics = [LyricLine(0.2, 1.0, "信じてね", "ja"), LyricLine(0.2, 1.0, "相信我", "zh")]
+    save_analysis(
+        replace(song(0.25, 3.0), source=SongSource(audio, 0.0, 3.0, "Test"), lyrics=lyrics)
+    )
     plan = Plan("t", str(root), "", "test-song", [SlotPlan(0.0, 1.25, 1), SlotPlan(1.25, 2.5, 2)])
     plan.slots[0].shot = 2
     plan.slots[1].shot = None
@@ -87,13 +93,15 @@ def test_render_joins_clips_on_the_beat(tmp_path: Path, monkeypatch: pytest.Monk
     plan = Plan("t", str(root), "", "test-song", [SlotPlan(0.0, 1.25, 2)])
     result = api.render_plan(str(_write(tmp_path, plan)), "preview", otio=True)
     outputs = cast(list[str], result["outputs"])
+    video = next(o for o in outputs if o.endswith("preview.mp4"))
     frames = subprocess.run(
         ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v",
-         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", outputs[0]],
+         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", video],
         capture_output=True, text=True, check=True,
     ).stdout  # fmt: skip
     assert int(frames) == round(1.25 * Fraction(24000, 1001))
     assert any(o.endswith("timeline.otio") for o in outputs)
+    assert any(o.endswith("lyrics.ass") for o in outputs)
     assert (root / ".tokimeki/mads/t/report.html").exists()
 
 
@@ -101,3 +109,23 @@ def _write(tmp_path: Path, plan: Plan) -> Path:
     path = tmp_path / "plan.json"
     path.write_text(plan.to_json(), encoding="utf-8")
     return path
+
+
+def test_lyrics_become_bilingual_ass_and_srt(tmp_path: Path) -> None:
+    pairs = pair(
+        [LyricLine(8.1, 10.8, "信じてね", "ja"), LyricLine(8.1, 10.8, "相信我", "zh"),
+         LyricLine(30.0, 33.0, "外", "ja")]
+    )  # fmt: skip
+    fonts = Fonts("Yu Gothic", "Microsoft YaHei", tmp_path)
+    ass = write_lyrics(tmp_path, pairs, 5.0, 20.0, fonts, "t")
+    assert ass is not None
+    text = ass.read_text(encoding="utf-8-sig")
+    assert "Style: ja,Yu Gothic,60" in text and "Style: zh,Microsoft YaHei,42" in text
+    assert "Dialogue: 0,0:00:03.10,0:00:05.80,ja,,0,0,0,,{\\fad(150,220)}信じてね" in text
+    assert "外" not in text
+    assert (
+        (tmp_path / "lyrics.srt")
+        .read_text()
+        .startswith("1\n00:00:03,100 --> 00:00:05,800\n信じてね\n相信我")
+    )
+    assert write_lyrics(tmp_path, pairs, 40.0, 50.0, fonts, "t") is None

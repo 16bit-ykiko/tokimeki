@@ -98,14 +98,21 @@ def novelty(features: NDArray[np.float64], half: int = NOVELTY_HALF_WIDTH) -> ND
 
 
 def boundaries(
-    novelty_curve: NDArray[np.float64], sung: NDArray[np.bool_], min_bars: int = MIN_SECTION_BARS
+    novelty_curve: NDArray[np.float64],
+    sung: NDArray[np.bool_],
+    min_bars: int = MIN_SECTION_BARS,
+    refrain: NDArray[np.bool_] | None = None,
 ) -> list[int]:
-    """Section starts (bar indices): novelty peaks and where singing starts or stops."""
+    """Section starts (bar indices): where a refrain starts or stops, where singing starts or
+    stops, and novelty peaks, in that order of trust."""
     n = len(novelty_curve)
     candidates: list[tuple[float, int]] = []
-    for i in range(1, n):
-        if sung[i] != sung[i - 1] and bool((sung[i : i + 2] == sung[i]).all()):
-            candidates.append((np.inf, i))
+    for marks, weight in ((refrain, 2 * np.inf), (sung, np.inf)):
+        if marks is None:
+            continue
+        for i in range(1, n):
+            if marks[i] != marks[i - 1] and bool((marks[i : i + 2] == marks[i]).all()):
+                candidates.append((weight, i))
     threshold = novelty_curve.mean() + 0.5 * novelty_curve.std()
     for i in range(1, n - 1):
         v = novelty_curve[i]
@@ -127,12 +134,14 @@ def label_sections(
     end: float,
     vocal_known: bool = True,
     vocal_on: float = VOCAL_ON,
+    refrain: NDArray[np.bool_] | None = None,
 ) -> list[Section]:
     """Name the sections: repeated loud sung material is the chorus, what leads into it the
     pre-chorus, unsung parts intro/interlude/outro, the rest verses (bridge if heard once, late).
 
     Without a vocal line (`vocal_known` false) only a quieter first or last section becomes
-    the intro or outro."""
+    the intro or outro. With `refrain` (bars whose lyrics are sung more than once) the
+    sections mostly made of it are the chorus."""
     n = len(bars)
     spans = list(zip(starts, [*starts[1:], n], strict=True))
     means = np.array([features[a:b].mean(axis=0) for a, b in spans])
@@ -151,6 +160,8 @@ def label_sections(
         return float(np.mean([v for v, x in zip(loud, groups, strict=True) if x == g]))
 
     chorus = max(repeated, key=group_loudness, default=-1)
+    if refrain is not None and refrain.any():
+        chorus = -1
     first_sung = next((i for i, s in enumerate(sung) if s), len(spans))
     last_sung = max((i for i, s in enumerate(sung) if s), default=-1)
     if not vocal_known and len(spans) > 2:
@@ -159,13 +170,22 @@ def label_sections(
         sung[-1] = loud[-1] >= quiet
         first_sung = 0 if sung[0] else 1
         last_sung = len(spans) - 1 if sung[-1] else len(spans) - 2
+
+    def is_chorus(i: int) -> bool:
+        a, b = spans[i]
+        if refrain is not None and refrain.any():
+            return sung[i] and float(refrain[a:b].mean()) >= 0.5
+        return sung[i] and groups[i] == chorus
+
     labels: list[str] = []
     for i, group in enumerate(groups):
         if not sung[i]:
             labels.append("intro" if i < first_sung else "outro" if i > last_sung else "interlude")
-        elif group == chorus:
+        elif group == chorus or (
+            refrain is not None and float(refrain[spans[i][0] : spans[i][1]].mean()) >= 0.5
+        ):
             labels.append("chorus")
-        elif i + 1 < len(groups) and groups[i + 1] == chorus and spans[i][1] - spans[i][0] <= 8:
+        elif i + 1 < len(groups) and is_chorus(i + 1) and spans[i][1] - spans[i][0] <= 8:
             labels.append("pre-chorus")
         elif counts[group] == 1 and i > len(spans) // 2:
             labels.append("bridge")

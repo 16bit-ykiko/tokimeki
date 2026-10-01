@@ -54,7 +54,10 @@ class Slot:
 
 def first_chorus(sections: list[Section]) -> Excerpt:
     """From the top of the song through its first chorus, trimmed or extended by whole
-    sections to stay within `MIN_EXCERPT` to `MAX_EXCERPT` seconds when possible."""
+    sections to stay within `MIN_EXCERPT` to `MAX_EXCERPT` seconds when possible. A song
+    that short altogether (a TV-size OP) is taken whole."""
+    if sections and sections[-1].end - sections[0].start <= MAX_EXCERPT:
+        return Excerpt(sections[0].start, sections[-1].end, sections)
     last = next((i for i, s in enumerate(sections) if s.label == "chorus"), len(sections) - 1)
     first = 0
     while first < last and sections[last].end - sections[first].start > MAX_EXCERPT:
@@ -66,12 +69,13 @@ def first_chorus(sections: list[Section]) -> Excerpt:
 
 
 def _beat_slots(
-    beats: list[float], start: float, end: float, per_slot: int
+    beats: list[float], bars: list[float], start: float, end: float, per_slot: int
 ) -> list[tuple[float, float, int]]:
-    """Spans of `per_slot` beats from `start` to `end`; a span too short to read (a stray
-    beat, the section's remainder) joins its neighbour."""
-    inside = [b for b in beats if start <= b < end]
-    marks = [start, *[b for b in inside[per_slot::per_slot] if b - start > 1e-6], end]
+    """Spans of `per_slot` beats from the section's first bar line to `end` (a pickup before
+    that bar line is a span of its own); a span too short to read joins its neighbour."""
+    anchor = next((b for b in bars if start - 1e-6 <= b < end), start)
+    grid = [b for b in beats if anchor - 1e-6 <= b < end]
+    marks = sorted({start, *(b for b in grid[::per_slot] if b - start > 1e-6), end})
     spans = [(a, b) for a, b in pairwise(marks) if b > a]
     merged: list[tuple[float, float]] = []
     for a, b in spans:
@@ -87,8 +91,9 @@ def _beat_slots(
 def excerpt_between(
     bars: list[float], duration: float, sections: list[Section], start: float, end: float
 ) -> Excerpt:
-    """The stretch `start`-`end` (song seconds), snapped to the nearest bar lines."""
-    edges = [*bars, duration]
+    """The stretch `start`-`end` (song seconds), snapped to the nearest bar line (or the
+    song's start or end, or a section's start such as a pickup before the first bar)."""
+    edges = sorted({0.0, *bars, duration, *(s.start for s in sections)})
     first = min(edges, key=lambda b: abs(b - start))
     last = min(edges, key=lambda b: abs(b - end))
     if last <= first:
@@ -112,6 +117,7 @@ def excerpt_between(
 
 def make_slots(
     beats: list[float],
+    bars: list[float],
     bpm: float,
     excerpt: Excerpt,
     budget: int,
@@ -131,7 +137,7 @@ def make_slots(
             per_slot = fixed.get(
                 section.label, ladder[min(level.get(section.label, 0), len(ladder) - 1)]
             )
-            for a, b, n in _beat_slots(beats, section.start, section.end, per_slot):
+            for a, b, n in _beat_slots(beats, bars, section.start, section.end, per_slot):
                 spans.append((a, b, n, section.label))
         return [Slot(i, a, b, label, n) for i, (a, b, n, label) in enumerate(spans)]
 
