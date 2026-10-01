@@ -10,7 +10,7 @@ First series: _To LOVE-Ru Darkness_, seasons 1–2 (24 episodes).
 
 ## Stage 1: scene library
 
-1. **Shots.** TransNetV2 (or PySceneDetect) splits each episode into shots. OP/ED and recaps repeat every episode; perceptual hashes drop them.
+1. **Shots.** NVDEC decodes every frame on the GPU, scaled down there to 48×27; TransNetV2 (PyTorch, CUDA) splits the episode into shots. Each shot is sampled every 0.5 s, at least 3 frames, into the frame cache at up to 720p. _TODO:_ OP/ED and recaps repeat every episode; perceptual hashes across episodes will drop them (within one episode they cannot be told apart from the story).
 2. **Content filter.** WD14 tags sampled frames; shots rated questionable or explicit are dropped here, before anything else sees them. They never enter the library and are never sent to a cloud model.
 3. **Characters.** Anime face detection plus CCIP embeddings (`dghs-imgutils`). Faces across the whole series are clustered; you name each cluster once from a few thumbnails, which gives the cast without reference images. Per shot: who, face size (close-up or wide), share of screen time.
 4. **Lines and speakers.** External ASS subtitles when the release has them; otherwise faster-whisper (Japanese). Speakers from the subtitle's actor field, or by clustering voices and matching clusters to characters.
@@ -33,6 +33,17 @@ First series: _To LOVE-Ru Darkness_, seasons 1–2 (24 episodes).
 ## Sources
 
 You provide the episodes; nothing here downloads them. Prefer releases without burned-in subtitles (text at the bottom of the frame is hard to work around) and with external ASS subtitles, Japanese if possible.
+
+## Usage
+
+Put the episodes of a series in one directory (subdirectories are fine), then:
+
+```bash
+pixi run tokimeki gpu-check                                # once: is everything on the GPU?
+pixi run tokimeki ingest ~/anime/to-love-ru-darkness       # run every stage; reruns skip finished work
+pixi run tokimeki ingest ~/anime/to-love-ru-darkness --episode 01 --redo shots   # redo one stage (and the later ones)
+pixi run tokimeki status ~/anime/to-love-ru-darkness
+```
 
 ## Layout and data
 

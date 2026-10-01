@@ -40,7 +40,7 @@ def test_gpu_resize_halves_before_the_last_step() -> None:
 @pytest.mark.gpu
 def test_nvdec_decodes_every_frame(tmp_path: Path) -> None:
     clip = make_clip(tmp_path / "clip.mkv", ["color=c=red", "color=c=blue"])
-    frames = decode_for_transnet(clip, probe(clip))
+    frames = decode_for_transnet(clip, 320, 180)
     assert frames.shape == (48, 27, 48, 3)
     assert frames[10, 13, 24].tolist() == pytest.approx([255, 0, 0], abs=12)
     assert frames[40, 13, 24].tolist() == pytest.approx([0, 0, 255], abs=12)
@@ -50,7 +50,7 @@ def test_nvdec_decodes_every_frame(tmp_path: Path) -> None:
 def test_extract_frames_by_index(tmp_path: Path) -> None:
     clip = make_clip(tmp_path / "clip.mkv", ["color=c=red", "color=c=blue"])
     outs = [tmp_path / "out" / f"{i}.jpg" for i in (30, 5)]
-    extract_frames(clip, probe(clip), [30, 5], outs)
+    extract_frames(clip, 320, 180, [30, 5], outs)
     blue, red = (np.asarray(Image.open(p).convert("RGB"))[90, 160].tolist() for p in outs)
     assert red == pytest.approx([255, 0, 0], abs=12)
     assert blue == pytest.approx([0, 0, 255], abs=12)

@@ -13,7 +13,8 @@ def make_clip(
     """An H.264 clip of lavfi `sources` (such as `color=c=red`) with hard cuts between them."""
     args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
     for source in sources:
-        args += ["-f", "lavfi", "-i", f"{source}:size={size}:rate={rate}:duration={seconds}"]
+        joint = ":" if "=" in source else "="
+        args += ["-f", "lavfi", "-t", str(seconds), "-i", f"{source}{joint}size={size}:rate={rate}"]
     inputs = "".join(f"[{i}:v]" for i in range(len(sources)))
     args += ["-filter_complex", f"{inputs}concat=n={len(sources)}:v=1[out]", "-map", "[out]"]
     args += ["-c:v", "libx264", "-threads", "1", "-pix_fmt", "yuv420p", str(path)]

@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from tokimeki.media.probe import VideoInfo, probe
+from tokimeki.media.probe import probe
 
 TRANSNET_SIZE = (48, 27)
 FRAME_HEIGHT = 720
@@ -78,11 +78,11 @@ def _run(args: Sequence[str], what: str) -> bytes:
     return result.stdout
 
 
-def decode_for_transnet(path: Path, info: VideoInfo) -> NDArray[np.uint8]:
-    """Every frame of the video as `(frames, 27, 48, 3)` RGB, the input TransNetV2 expects."""
+def decode_for_transnet(path: Path, width: int, height: int) -> NDArray[np.uint8]:
+    """Every frame of a `width`x`height` video as `(frames, 27, 48, 3)` RGB for TransNetV2."""
     tw, th = TRANSNET_SIZE
-    mid_w, mid_h = _even(min(info.width, tw * 5)), _even(min(info.height, th * 5))
-    chain = [*gpu_resize(info.width, info.height, mid_w, mid_h), "hwdownload", "format=nv12"]
+    mid_w, mid_h = _even(min(width, tw * 5)), _even(min(height, th * 5))
+    chain = [*gpu_resize(width, height, mid_w, mid_h), "hwdownload", "format=nv12"]
     chain.append(f"scale={tw}:{th}:flags=area")
     raw = _run(
         [*_input(path), "-vf", ",".join(chain), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
@@ -94,9 +94,9 @@ def decode_for_transnet(path: Path, info: VideoInfo) -> NDArray[np.uint8]:
     return np.frombuffer(raw, dtype=np.uint8).reshape(-1, th, tw, 3)
 
 
-def frame_size(info: VideoInfo, height: int = FRAME_HEIGHT) -> tuple[int, int]:
-    out_h = _even(min(height, info.height))
-    return _even(info.width * out_h / info.height), out_h
+def frame_size(width: int, height: int, max_height: int = FRAME_HEIGHT) -> tuple[int, int]:
+    out_h = _even(min(max_height, height))
+    return _even(width * out_h / height), out_h
 
 
 def _select_expr(indices: Sequence[int]) -> str:
@@ -110,12 +110,15 @@ def _select_expr(indices: Sequence[int]) -> str:
 
 def extract_frames(
     path: Path,
-    info: VideoInfo,
+    width: int,
+    height: int,
     frame_indices: Sequence[int],
     out_paths: Sequence[Path],
-    height: int = FRAME_HEIGHT,
 ) -> None:
-    """Write the frames at `frame_indices` (decode order, from 0) as JPEGs to `out_paths`."""
+    """Write the frames at `frame_indices` (decode order, from 0) as JPEGs to `out_paths`.
+
+    Frames are scaled down to at most `FRAME_HEIGHT` lines on the GPU.
+    """
     if len(frame_indices) != len(out_paths):
         raise ValueError("one output path per frame index")
     if not frame_indices:
@@ -124,10 +127,10 @@ def extract_frames(
     indices = [frame_indices[i] for i in order]
     if len(set(indices)) != len(indices):
         raise ValueError("frame indices must be unique")
-    width, out_h = frame_size(info, height)
+    out_w, out_h = frame_size(width, height)
     chain = [
         f"select={_select_expr(indices)}",
-        *gpu_resize(info.width, info.height, width, out_h),
+        *gpu_resize(width, height, out_w, out_h),
         "hwdownload",
         "format=nv12",
     ]
@@ -188,4 +191,5 @@ def nvdec_selftest(work_dir: Path) -> int:
         check=True,
         capture_output=True,
     )
-    return len(decode_for_transnet(clip, probe(clip)))
+    info = probe(clip)
+    return len(decode_for_transnet(clip, info.width, info.height))
