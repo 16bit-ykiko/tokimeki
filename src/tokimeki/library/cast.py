@@ -177,3 +177,25 @@ def episode_cast(conn: sqlite3.Connection, episode_id: int) -> list[ShotCast]:
         (episode_id,),
     ).fetchall()
     return [ShotCast(*row) for row in rows]
+
+
+def cluster_character_tags(
+    conn: sqlite3.Connection, cluster_id: int, limit: int = 3
+) -> list[tuple[str, float]]:
+    """WD14 character tags on the cluster's single-face frames, with the share of them they're on.
+
+    A frame-level tag cannot say which face it means, so frames with several faces are left out.
+    """
+    solo = """
+        SELECT fa.frame_id FROM faces AS fa WHERE fa.cluster_id = ?
+        AND (SELECT COUNT(*) FROM faces AS f2 WHERE f2.frame_id = fa.frame_id) = 1
+    """
+    total_row: tuple[int] = conn.execute(f"SELECT COUNT(*) FROM ({solo})", (cluster_id,)).fetchone()
+    if total_row[0] == 0:
+        return []
+    rows: list[tuple[str, int]] = conn.execute(
+        f"SELECT t.tag, COUNT(*) FROM frame_tags AS t WHERE t.category = 'character'"
+        f" AND t.frame_id IN ({solo}) GROUP BY t.tag ORDER BY COUNT(*) DESC, t.tag LIMIT ?",
+        (cluster_id, limit),
+    ).fetchall()
+    return [(tag, count / total_row[0]) for tag, count in rows]

@@ -8,10 +8,11 @@ import pytest
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import content_filter, frames, shots
+from tokimeki.stages import cast, content_filter, frames, shots
 
-FRAMES = 48
+FRAMES = 72
 CUT = 24
 RED, BLUE = (220, 30, 30), (30, 30, 220)
 
@@ -67,8 +68,30 @@ class FakeTagger:
         pass
 
 
+class FakeDetector:
+    """One face in the middle of every frame."""
+
+    def detect(self, images: Sequence[Image.Image]) -> list[list[Detection]]:
+        return [[Detection(0.4, 0.3, 0.6, 0.7, 0.9)] for _ in images]
+
+    def close(self) -> None:
+        pass
+
+
+class FakeEncoder:
+    """The same character everywhere."""
+
+    def embed(self, images: Sequence[Image.Image]) -> NDArray[np.float32]:
+        return np.ones((len(images), 8), dtype=np.float32)
+
+    def close(self) -> None:
+        pass
+
+
 def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shots, "TransNet", FakeTransNet)
     monkeypatch.setattr(shots, "decode_for_transnet", fake_decode)
     monkeypatch.setattr(frames, "extract_frames", fake_extract)
     monkeypatch.setattr(content_filter, "Wd14Tagger", FakeTagger)
+    monkeypatch.setattr(cast, "FaceDetector", FakeDetector)
+    monkeypatch.setattr(cast, "CcipEncoder", FakeEncoder)

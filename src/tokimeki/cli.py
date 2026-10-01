@@ -6,10 +6,18 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from tokimeki.library.cast import (
+    cluster_character_tags,
+    list_clusters,
+    merge_clusters,
+    name_cluster,
+)
+from tokimeki.library.db import transaction
 from tokimeki.library.episodes import list_episodes, stage_done
 from tokimeki.library.shots import status_counts
 from tokimeki.stages import pipeline
 from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.cast import split_cluster
 from tokimeki.stages.selfcheck import run_checks
 
 type Handler = Callable[[argparse.Namespace], int]
@@ -55,6 +63,45 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cast_list(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    for cluster in list_clusters(ctx.conn):
+        hints = ", ".join(
+            f"{tag} {share:.0%}" for tag, share in cluster_character_tags(ctx.conn, cluster.id)
+        )
+        name = cluster.name or "(unnamed)"
+        print(f"{cluster.id:4}  {name:24} {cluster.face_count:5} faces  {hints}")
+    return 0
+
+
+def cmd_cast_name(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    cluster: int = args.cluster
+    name: str = args.name
+    with transaction(ctx.conn):
+        name_cluster(ctx.conn, cluster, name.strip() or None)
+    return 0
+
+
+def cmd_cast_merge(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    sources: list[int] = args.source
+    target: int = args.target
+    with transaction(ctx.conn):
+        for source in sources:
+            merge_clusters(ctx.conn, source, target)
+    return 0
+
+
+def cmd_cast_split(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    cluster: int = args.cluster
+    with transaction(ctx.conn):
+        created = split_cluster(ctx.conn, cluster)
+    print(f"cluster {cluster} split; new clusters: {', '.join(map(str, created)) or 'none'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tokimeki", description=__doc__)
     sub = parser.add_subparsers(required=True, metavar="command")
@@ -82,6 +129,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=pipeline.STAGE_NAMES[-1],
         help="stop after this stage",
     )
+
+    cast = sub.add_parser("cast", help="list, name, merge or split character clusters")
+    cast_sub = cast.add_subparsers(required=True, metavar="action")
+
+    def cast_command(name: str, handler: Handler, help_: str) -> argparse.ArgumentParser:
+        p = cast_sub.add_parser(name, help=help_, description=help_)
+        p.set_defaults(handler=handler)
+        p.add_argument("series", help="the series directory holding the episodes")
+        return p
+
+    cast_command("list", cmd_cast_list, "list clusters with ids, names and WD14 name hints")
+    name = cast_command("name", cmd_cast_name, "name a cluster (an empty name clears it)")
+    name.add_argument("cluster", type=int)
+    name.add_argument("name")
+    merge = cast_command("merge", cmd_cast_merge, "move the faces of clusters into another")
+    merge.add_argument("source", type=int, nargs="+")
+    merge.add_argument("target", type=int)
+    split = cast_command("split", cmd_cast_split, "re-cluster one cluster more tightly")
+    split.add_argument("cluster", type=int)
     return parser
 
 

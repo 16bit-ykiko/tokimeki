@@ -2,7 +2,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from tokimeki.library.records import Episode
-from tokimeki.stages import content_filter, shots
+from tokimeki.stages import cast, content_filter, shots
 from tokimeki.stages.base import Context
 
 
@@ -16,6 +16,7 @@ class Stage:
 STAGES = (
     Stage(shots.NAME, shots.run, shots.reset),
     Stage(content_filter.NAME, content_filter.run, content_filter.reset),
+    Stage(cast.NAME, cast.run, cast.reset),
 )
 STAGE_NAMES = tuple(stage.name for stage in STAGES)
 

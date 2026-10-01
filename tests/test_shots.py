@@ -63,10 +63,10 @@ def test_stage_is_resumable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert stage_done(ctx.conn, episode.id, "shots")
     assert [(s.start_frame, s.end_frame) for s in list_shots(ctx.conn, episode.id)] == [
         (0, 24),
-        (24, 48),
+        (24, 72),
     ]
-    assert len(list(ctx.paths.frames_dir(episode.id).glob("*.jpg"))) == 6
-    assert get_episode(ctx.conn, episode.id).frame_count == 48
+    assert len(list(ctx.paths.frames_dir(episode.id).glob("*.jpg"))) == 7
+    assert get_episode(ctx.conn, episode.id).frame_count == 72
 
     monkeypatch.setattr(shots, "TransNet", None)
     pipeline.run(ctx, episodes, until="shots")

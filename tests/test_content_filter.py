@@ -58,7 +58,7 @@ def test_unsafe_shots_leave_no_trace(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert (red.start_frame, red.end_frame) == (0, fakes.CUT)
     assert list_frames(ctx.conn, red.id) == []
     kept = list_frames(ctx.conn, blue.id)
-    assert len(kept) == 3
+    assert len(kept) == 4
     cached = sorted(int(p.stem) for p in ctx.paths.frames_dir(1).glob("*.jpg"))
     assert cached == [f.frame_index for f in kept]
     tags = frame_tags(ctx.conn, kept[0].id)
@@ -85,7 +85,7 @@ def test_rerun_skips_and_redo_rejudges(tmp_path: Path, monkeypatch: pytest.Monke
     pipeline.run(ctx, episodes, until="filter")
     statuses = [s.status for s in list_shots(ctx.conn, 1)]
     assert statuses == [ShotStatus.DROPPED, ShotStatus.KEPT]
-    assert len(list(ctx.paths.frames_dir(1).glob("*.jpg"))) == 3
+    assert len(list(ctx.paths.frames_dir(1).glob("*.jpg"))) == 4
 
 
 @pytest.mark.gpu
