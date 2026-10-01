@@ -209,3 +209,22 @@ def cluster_character_tags(
         (cluster_id, limit),
     ).fetchall()
     return [(tag, count / total_row[0]) for tag, count in rows]
+
+
+def named_cast_by_shot(
+    conn: sqlite3.Connection, episode_id: int
+) -> dict[int, list[tuple[str, ShotCast]]]:
+    """Per shot, the characters the user has named, most present first."""
+    rows: list[tuple[str, int, int, float, float, float]] = conn.execute(
+        "SELECT c.name, sc.shot_id, sc.cluster_id, sc.presence, sc.face_height, sc.face_area"
+        " FROM shot_cast AS sc JOIN clusters AS c ON c.id = sc.cluster_id"
+        " JOIN shots AS s ON s.id = sc.shot_id"
+        " WHERE s.episode_id = ? AND c.name IS NOT NULL ORDER BY s.idx, sc.presence DESC",
+        (episode_id,),
+    ).fetchall()
+    out: dict[int, list[tuple[str, ShotCast]]] = {}
+    for name, shot_id, cluster_id, presence, height, area in rows:
+        out.setdefault(shot_id, []).append(
+            (name, ShotCast(shot_id, cluster_id, presence, height, area))
+        )
+    return out

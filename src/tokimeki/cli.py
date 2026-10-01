@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki.report import build_report
-from tokimeki.stages import cast, pipeline
+from tokimeki.stages import cast, pipeline, scenes
 from tokimeki.stages.base import open_series, register_episodes
 from tokimeki.stages.selfcheck import run_checks
 
@@ -59,6 +59,24 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_report(args: argparse.Namespace) -> int:
     ctx = open_series(_series(args))
     print(f"report: {build_report(ctx.conn, ctx.paths)}")
+    return 0
+
+
+def cmd_scenes(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    only: list[str] | None = args.episode
+    for episode in register_episodes(ctx):
+        if only and not any(part in episode.path for part in only):
+            continue
+        print(episode.path)
+        for s in scenes.summaries(ctx, episode):
+            who = ", ".join(f"{name} {share:.0%}" for name, share in s.cast) or "-"
+            faces = ", ".join(f"{t.tag} {t.peak:.2f}" for t in s.expressions[:4]) or "-"
+            first = s.lines[0].text.replace("\n", " ") if s.lines else ""
+            print(
+                f"  #{s.scene.index:3} {s.start:7.1f}-{s.end:7.1f}s {len(s.scene.shot_ids):2} shots"
+                f"  {who}  [{faces}]  {len(s.lines)} lines  {first[:24]}"
+            )
     return 0
 
 
@@ -127,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after this stage",
     )
     ingest.add_argument("--no-report", action="store_true", help="do not rebuild the report")
+
+    scene_list = command("scenes", cmd_scenes, "list scenes with cast, expressions and lines")
+    scene_list.add_argument("series", help="the series directory holding the episodes")
+    scene_list.add_argument("--episode", action="append", help="only episodes containing this")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")

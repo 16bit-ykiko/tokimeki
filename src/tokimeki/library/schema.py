@@ -139,4 +139,26 @@ WHERE l.start < CAST(s.end_frame AS REAL) * e.fps_den / e.fps_num
   AND l.end > CAST(s.start_frame AS REAL) * e.fps_den / e.fps_num;
 """
 
-MIGRATIONS: tuple[str, ...] = (V1, V2, V3)
+V4 = """
+CREATE TABLE scenes (
+    id INTEGER PRIMARY KEY,
+    episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    UNIQUE (episode_id, idx)
+) STRICT;
+
+CREATE TABLE scene_shots (
+    scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+    shot_id INTEGER NOT NULL UNIQUE REFERENCES shots(id) ON DELETE CASCADE,
+    PRIMARY KEY (scene_id, shot_id)
+) STRICT;
+
+CREATE TRIGGER scenes_only_of_kept_shots
+BEFORE INSERT ON scene_shots
+WHEN (SELECT status FROM shots WHERE id = NEW.shot_id) IS NOT 'kept'
+BEGIN
+    SELECT RAISE(ABORT, 'scenes hold only kept shots');
+END;
+"""
+
+MIGRATIONS: tuple[str, ...] = (V1, V2, V3, V4)

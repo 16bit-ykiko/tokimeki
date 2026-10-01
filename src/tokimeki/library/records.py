@@ -150,3 +150,22 @@ class Part:
     kind: PartKind
     start: float
     end: float
+
+
+@dataclass(frozen=True, slots=True)
+class Scene:
+    """Consecutive kept shots that belong together (one exchange, one moment)."""
+
+    id: int
+    episode_id: int
+    index: int
+    shot_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TagStat:
+    """A tag over some frames: its highest score and the share of the frames it is on."""
+
+    tag: str
+    peak: float
+    share: float
