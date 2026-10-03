@@ -27,6 +27,41 @@ class PlanFormatError(ValueError):
         self.problems = problems
 
 
+FX_KINDS = ("flash", "punch", "drift")
+
+
+@dataclass
+class Fx:
+    """An effect on one slot's clip.
+
+    flash: the first `frames` frames after the cut fade from white (`strength` at the cut).
+    punch: a quick push-in to `zoom` on the accent beat `at` (song seconds), easing back.
+    drift: a slow push-in across the whole slot, from 1x to `zoom`, toward `focus`.
+    `focus` (shares of the frame) is where punch and drift zoom to; refine puts it on her face.
+    """
+
+    kind: str
+    at: float | None = None
+    zoom: float | None = None
+    frames: int | None = None
+    strength: float | None = None
+    focus: tuple[float, float] | None = None
+
+    def to_json(self) -> object:
+        out: Json = {"kind": self.kind}
+        if self.at is not None:
+            out["at"] = round(self.at, 4)
+        if self.zoom is not None:
+            out["zoom"] = round(self.zoom, 4)
+        if self.frames is not None:
+            out["frames"] = self.frames
+        if self.strength is not None:
+            out["strength"] = round(self.strength, 3)
+        if self.focus is not None:
+            out["focus"] = [round(self.focus[0], 3), round(self.focus[1], 3)]
+        return out if len(out) > 1 else self.kind
+
+
 @dataclass
 class SlotPlan:
     start: float
@@ -45,6 +80,7 @@ class SlotPlan:
     refine fills itself; true: the plan's own window too; false: never."""
     accent: float | None = None
     """A beat inside the slot (song seconds) a motion onset should land on."""
+    fx: list[Fx] = field(default_factory=list[Fx])
 
     @property
     def duration(self) -> float:
@@ -130,6 +166,8 @@ class Plan:
                 out["sync"] = s.sync
             if s.accent is not None:
                 out["accent"] = round(s.accent, 4)
+            if s.fx:
+                out["fx"] = [f.to_json() for f in s.fx]
             return out
 
         def voice(v: VoicePlan) -> Json:
@@ -206,6 +244,43 @@ class Plan:
                 return None
             return value
 
+        def effects(obj: Json, where: str) -> list[Fx]:
+            raw = obj.get("fx", [])
+            if not isinstance(raw, list):
+                problems.append(f"{where}fx: expected a list")
+                return []
+            out: list[Fx] = []
+            for j, item in enumerate(cast(list[object], raw)):
+                here = f"{where}fx[{j}]."
+                if isinstance(item, str):
+                    out.append(Fx(item))
+                    continue
+                if not isinstance(item, dict):
+                    problems.append(f"{where}fx[{j}]: expected a name or an object")
+                    continue
+                e = cast(Json, item)
+                focus = e.get("focus")
+                point: tuple[float, float] | None = None
+                if focus is not None:
+                    items = cast(list[object], focus) if isinstance(focus, list) else []
+                    if len(items) != 2 or not all(
+                        isinstance(v, int | float) and not isinstance(v, bool) for v in items
+                    ):
+                        problems.append(f"{here}focus: expected [x, y]")
+                    else:
+                        point = (float(cast(float, items[0])), float(cast(float, items[1])))
+                out.append(
+                    Fx(
+                        text(e, "kind", here),
+                        number(e, "at", here, optional=True),
+                        number(e, "zoom", here, optional=True),
+                        integer(e, "frames", here),
+                        number(e, "strength", here, optional=True),
+                        point,
+                    )
+                )
+            return out
+
         if d.get("schema", PLAN_SCHEMA) not in READABLE_SCHEMAS:
             problems.append(f"schema: expected one of {', '.join(READABLE_SCHEMAS)}")
         plan = Plan(
@@ -246,6 +321,7 @@ class Plan:
                     episode=text(s, "episode", where, ""),
                     sync=flag(s, "sync", where, True) if "sync" in s else None,
                     accent=number(s, "accent", where, optional=True),
+                    fx=effects(s, where),
                 )
             )
         raw_voices = d.get("voices", [])
@@ -366,6 +442,53 @@ PLAN_JSON_SCHEMA: Json = {
                         "type": "number",
                         "description": "A beat inside the slot (song seconds) for a motion"
                         " onset to land on, e.g. one of the context's accents.",
+                    },
+                    "fx": {
+                        "type": "array",
+                        "description": "Effects: a name with defaults, or an object.",
+                        "items": {
+                            "oneOf": [
+                                {"enum": list(FX_KINDS)},
+                                {
+                                    "type": "object",
+                                    "required": ["kind"],
+                                    "properties": {
+                                        "kind": {
+                                            "enum": list(FX_KINDS),
+                                            "description": "flash: white fading out over the"
+                                            " first frames after the cut. punch: a quick push-in"
+                                            " on an accent beat, easing back. drift: a slow"
+                                            " push-in across the slot (for still shots).",
+                                        },
+                                        "at": {
+                                            "type": "number",
+                                            "description": "punch: the accent beat (song s);"
+                                            " refine picks the slot's strongest.",
+                                        },
+                                        "zoom": {
+                                            "type": "number",
+                                            "description": "punch (1.12) and drift (1.08):"
+                                            " how far in; 1-1.3.",
+                                        },
+                                        "frames": {
+                                            "type": "integer",
+                                            "description": "flash: 1-4 (3).",
+                                        },
+                                        "strength": {
+                                            "type": "number",
+                                            "description": "flash: whiteness at the cut,"
+                                            " 0-1 (0.85).",
+                                        },
+                                        "focus": {
+                                            "type": "array",
+                                            "items": {"type": "number"},
+                                            "description": "punch/drift: [x, y] in shares of"
+                                            " the frame to zoom to; refine puts it on her face.",
+                                        },
+                                    },
+                                },
+                            ]
+                        },
                     },
                 },
             },

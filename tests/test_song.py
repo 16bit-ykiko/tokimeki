@@ -16,6 +16,7 @@ from tokimeki.models.beats import (
 )
 from tokimeki.models.separation import CHUNK, N_FFT, VocalSeparator, band_mask, mdx_input
 from tokimeki.models.separation import FPS as SEPARATION_FPS
+from tokimeki.song import accents
 from tokimeki.song.analysis import SongSource, assemble, lyrics_share, refrain_bars, song_id
 from tokimeki.song.bounds import song_bounds
 from tokimeki.song.lyrics import LyricLine, LyricSource, pair, parse_lrc, read_lyrics
@@ -301,3 +302,16 @@ def test_a_pickup_opens_its_own_slot() -> None:
     sections = [_section("intro", 0.0, 9.0)]
     slots = make_slots(beats, beats[2::4], 120.0, Excerpt(0.0, 9.0, sections), 100)
     assert [(s.start, s.end) for s in slots[:3]] == [(0.0, 1.0), (1.0, 3.0), (3.0, 5.0)]
+
+
+def test_accents_mark_the_beats_that_hit() -> None:
+    rate = accents.RATE
+    t = np.arange(rate * 4) / rate
+    samples = (0.01 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    for hit, level in ((1.0, 0.8), (2.0, 0.1)):
+        a = round(hit * rate)
+        samples[a : a + rate // 10] += level * np.random.default_rng(0).standard_normal(rate // 10)
+    strengths = accents.accent_strengths(samples, [0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+    assert strengths[1] == max(strengths) and strengths[1] > 0.9
+    assert strengths[1] > strengths[3] > strengths[0]
+    assert accents.accent_strengths(samples, []) == []

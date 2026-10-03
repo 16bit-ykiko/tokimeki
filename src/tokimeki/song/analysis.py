@@ -31,6 +31,8 @@ from tokimeki.models.separation import MODEL_FILE as SEPARATION_MODEL
 from tokimeki.models.separation import SAMPLE_RATE as SEPARATION_RATE
 from tokimeki.models.separation import VocalSeparator
 from tokimeki.song import bounds, structure
+from tokimeki.song.accents import RATE as ACCENT_RATE
+from tokimeki.song.accents import accent_strengths
 from tokimeki.song.lyrics import LyricLine, LyricSource, read_lyrics
 from tokimeki.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
 from tokimeki.song.structure import Section
@@ -79,6 +81,8 @@ class SongAnalysis:
     slots: list[Slot] = field(default_factory=list[Slot])
     inputs: dict[str, str] = field(default_factory=dict[str, str])
     """What the beats and sections were computed from, to know when to redo them."""
+    accents: list[float] | None = None
+    """How hard each beat hits, 0-1; None in analyses stored before accents existed."""
 
     def to_json(self) -> str:
         data = asdict(self)
@@ -115,6 +119,7 @@ class SongAnalysis:
             excerpt=(float(excerpt[0]), float(excerpt[1])),
             slots=[_slot(cast(Json, x)) for x in cast(list[object], d["slots"])],
             inputs=cast(dict[str, str], d.get("inputs", {})),
+            accents=cast(list[float] | None, d.get("accents")),
         )
 
 
@@ -367,6 +372,19 @@ def measure(
     return assemble(source, beats, mix, len(audio) / SAMPLE_RATE, lyrics, backing, separated)
 
 
+def with_accents(analysis: SongAnalysis) -> SongAnalysis:
+    """The analysis with its beat accents, measured (and stored) if it has none yet."""
+    if analysis.accents is not None:
+        return analysis
+    source = analysis.source
+    samples = decode_audio(
+        source.path, ACCENT_RATE, source.stream, start=source.offset, duration=source.duration
+    )
+    done = replace(analysis, accents=accent_strengths(samples, analysis.beats))
+    save_analysis(done)
+    return done
+
+
 def excerpt_of(analysis: SongAnalysis, span: tuple[float, float] | None) -> Excerpt:
     if span is None:
         return first_chorus(analysis.sections)
@@ -447,7 +465,7 @@ def analyse_song(
     analysis = replace(analysis, excerpt=(excerpt.start, excerpt.end))
     analysis = replace(analysis, slots=suggested_slots(analysis))
     save_analysis(analysis)
-    return analysis
+    return with_accents(analysis)
 
 
 def save_analysis(analysis: SongAnalysis) -> None:

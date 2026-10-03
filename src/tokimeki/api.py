@@ -34,12 +34,14 @@ from tokimeki.mad.report import write_report
 from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.validate import Issue, validate
 from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines, voice_bounds
+from tokimeki.media.audio import AudioError
 from tokimeki.song.analysis import (
     SongAnalysis,
     SongError,
     analyse_song,
     load_analysis,
     slots_over,
+    with_accents,
 )
 from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages import motion, voice
@@ -142,8 +144,8 @@ def _analysis(song: str | None) -> SongAnalysis | None:
     if not song:
         return None
     try:
-        return load_analysis(song)
-    except SongError as error:
+        return with_accents(load_analysis(song))
+    except (SongError, AudioError) as error:
         raise ApiError(str(error)) from error
 
 
@@ -243,8 +245,8 @@ def plan_validate(plan: str | Json) -> Json:
     parsed = _load_plan(plan)
     ctx = _series(parsed.series)
     try:
-        analysis = load_analysis(parsed.song) if parsed.song else None
-    except SongError:
+        analysis = with_accents(load_analysis(parsed.song)) if parsed.song else None
+    except (SongError, AudioError):
         analysis = None
     return _report(parsed, validate(ctx.conn, parsed, analysis))
 

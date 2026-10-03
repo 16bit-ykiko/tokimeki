@@ -52,8 +52,9 @@ def song(beat: float = 0.5, length: float = 20.0, *, chorus_only: bool = False) 
     if chorus_only:
         sections = [Section("chorus", 1, 0, 1, 0.0, length, 0.5, 2.0)]
     source = SongSource(Path("song.flac"), 0.0, length, "Test")
+    accents = [0.6 if i % 4 == 0 else 0.3 for i in range(len(beats))]
     return SongAnalysis("test-song", "Test", source, 60 / beat, beats, beats[::4], [], None, "none",
-                        sections, [], (0.0, length), [])  # fmt: skip
+                        sections, [], (0.0, length), [], accents=accents)  # fmt: skip
 
 
 def test_cuteness_and_fit() -> None:

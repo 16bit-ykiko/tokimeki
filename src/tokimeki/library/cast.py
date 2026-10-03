@@ -303,19 +303,22 @@ def named_cast_by_shot(
     return out
 
 
-def named_face_heights(
+def named_faces(
     conn: sqlite3.Connection, episode_id: int, name: str
-) -> dict[int, dict[int, float]]:
-    """Per shot, per sampled frame index: the height of the named character's largest face."""
-    rows: list[tuple[int, int, float]] = conn.execute(
-        "SELECT f.shot_id, f.frame_index, MAX(fa.y1 - fa.y0) FROM faces AS fa"
+) -> dict[int, dict[int, tuple[float, float, float]]]:
+    """Per shot, per sampled frame index: the named character's largest face as (height,
+    centre x, centre y), shares of the frame. (SQLite takes the bare columns from the row
+    that has the MAX.)"""
+    rows: list[tuple[int, int, float, float, float]] = conn.execute(
+        "SELECT f.shot_id, f.frame_index, MAX(fa.y1 - fa.y0), (fa.x0 + fa.x1) / 2,"
+        " (fa.y0 + fa.y1) / 2 FROM faces AS fa"
         " JOIN clusters AS c ON c.id = fa.cluster_id"
         " JOIN frames AS f ON f.id = fa.frame_id"
         " JOIN shots AS s ON s.id = f.shot_id"
         " WHERE s.episode_id = ? AND c.name = ? GROUP BY f.shot_id, f.frame_index",
         (episode_id, name),
     ).fetchall()
-    out: dict[int, dict[int, float]] = {}
-    for shot_id, frame_index, height in rows:
-        out.setdefault(shot_id, {})[frame_index] = height
+    out: dict[int, dict[int, tuple[float, float, float]]] = {}
+    for shot_id, frame_index, height, x, y in rows:
+        out.setdefault(shot_id, {})[frame_index] = (height, x, y)
     return out

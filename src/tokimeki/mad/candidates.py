@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
-from tokimeki.library.cast import named_cast_by_shot, named_face_heights
+from tokimeki.library.cast import named_cast_by_shot, named_faces
 from tokimeki.library.lines import lines_by_shot, shots_in_parts
 from tokimeki.library.records import Episode, Shot, ShotStatus, TagStat
 from tokimeki.library.scenes import list_scenes
@@ -70,6 +70,8 @@ class FramePoint:
     face: float
     """Height of the character's face in this frame (0 if not seen)."""
     tags: Mapping[str, float]
+    centre: tuple[float, float] | None = None
+    """Where her face is (shares of the frame), if seen."""
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,17 @@ class Candidate:
     def framing(self) -> str:
         return framing(self.face_height)
 
+    def focus(self, start: float, end: float) -> tuple[float, float]:
+        """Where her face is during `start`-`end` (episode seconds): the seen frame nearest
+        its middle, else the frame's centre a little high, where faces usually are."""
+        middle = (start + end) / 2
+        seen = [f for f in self.frames if f.centre is not None]
+        if not seen:
+            return (0.5, 0.45)
+        nearest = min(seen, key=lambda f: abs(f.time - middle))
+        assert nearest.centre is not None
+        return nearest.centre
+
     @cached_property
     def peak(self) -> FramePoint:
         """The cutest sampled frame the character is seen in (any frame if never seen)."""
@@ -125,7 +138,7 @@ def find_candidates(
     for episode in episodes:
         cast = named_cast_by_shot(ctx.conn, episode.id)
         parts = shots_in_parts(ctx.conn, episode.id)
-        heights = named_face_heights(ctx.conn, episode.id, character)
+        faces = named_faces(ctx.conn, episode.id, character)
         said = lines_by_shot(ctx.conn, episode.id)
         scene_of = {
             shot_id: scene.index
@@ -145,10 +158,14 @@ def find_candidates(
                 < MIN_SHOT_SECONDS
             ):
                 continue
-            seen = heights.get(shot.id, {})
+            seen = faces.get(shot.id, {})
             frames = tuple(
                 FramePoint(
-                    episode.seconds(index), cuteness(tags, boost), seen.get(index, 0.0), tags
+                    episode.seconds(index),
+                    cuteness(tags, boost),
+                    seen[index][0] if index in seen else 0.0,
+                    tags,
+                    seen[index][1:] if index in seen else None,
                 )
                 for index, tags in frame_tag_scores(ctx.conn, shot.id, EXPRESSION_TAGS).items()
             )
