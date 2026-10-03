@@ -1,6 +1,6 @@
 # tokimeki — Project Guide
 
-Finds the cute moments of anime heroines across a series and cuts them into MADs. Stage 1 is a scene library, stage 2 the music-synced cut; `README.md` holds the design and is kept current as decisions are made.
+A personal toolkit that brings anime heroines to life around a series' cast (faces, names, voices): a scene library and MADs from the anime (working), character voice banks and models (planned), and manga/novels voiced in those voices through a screenshot service (planned). `README.md` is the overview; `docs/` holds the design and is kept current as decisions are made.
 
 ## Hard Rules
 

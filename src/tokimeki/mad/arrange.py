@@ -1,6 +1,6 @@
 """The draft arranger: a first plan an agent (or person) starts from and edits.
 
-It follows the README's editing rules where tags can tell: everyday moments in the verse,
+It follows the editing rules in docs/mad.md where tags can tell: everyday moments in the verse,
 the cutest close-ups in the chorus, an establishing look in the intro, her best smile to
 close, no shot twice, and close-ups and wider shots alternating.
 """
