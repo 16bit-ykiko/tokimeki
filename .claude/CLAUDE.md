@@ -7,6 +7,7 @@ A personal toolkit that brings anime heroines to life around a series' cast (fac
 - **Strict types, zero tolerance.** `pixi run check` (ruff lint, ruff format check, basedpyright strict) passes on every commit. No `# type: ignore` or `# pyright: ignore` without a stated reason; untyped third-party APIs get a typed wrapper in one place instead of `Any` leaking through.
 - **The content filter comes first.** Shots WD14 rates questionable or explicit are dropped before any other stage sees them: they never enter the library and are never sent to a cloud model.
 - **Media never goes into git.** Episodes, songs, subtitles, frames, databases and renders live in the data directory outside the repository.
+- **Voice data never leaves the machine.** Voice banks, voice models and generated speech stay in the data directory: never in git, never uploaded or shared.
 - **Nothing downloads sources.** The user provides the episodes; no BitTorrent or scraping in this code or in sessions.
 - **No bursts of cloud calls or agent sessions.** Batch API work is rate-limited and resumable; never start many Claude/Codex sessions in a short time (account ban risk).
 - **One GPU model at a time.** The GPU has 8 GB; stages load a model, run it over the batch, and free it.

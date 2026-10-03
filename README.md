@@ -36,7 +36,7 @@ Cutting a MAD is a handful of JSON commands an agent (or you) drives: see [MAD](
 
 ## Personal use only
 
-tokimeki is for personal use. You bring the episodes, manga and novels; nothing here downloads them.
+tokimeki is for personal use, on material you have obtained legally: discs or digital copies you bought, and works from legitimate services. You bring the episodes, manga and novels; nothing here downloads them, and it is not a way around paying for them.
 
 **Do not distribute AI-generated works made without authorisation.** Voiced pages, cloned voices, voice banks and voice models stay on your own machine: do not publish, upload, share or sell them, for free or otherwise. A voice belongs to its voice actor, and a work to its creators.
 
