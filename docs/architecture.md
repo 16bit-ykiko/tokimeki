@@ -21,6 +21,30 @@ src/tokimeki/
 
 Planned: `voice/` (speakers, transcripts, voice banks, voice models) and `comic/` (page scripts and voicing, behind the screenshot service), on the same layering.
 
+## Target layout
+
+Decided, not yet applied: the existing modules move once the voice work on `voice/bank` is merged. Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
+
+```
+src/tokimeki/
+  cast/      who each character is: face embeddings, names and aliases, per-shot fixes (anime and comic)
+  library/   SQLite: schema and migrations, typed records, queries
+  media/     decoding, audio, subtitles, cue sheets
+  models/    typed GPU model wrappers, one model on the GPU at a time
+  render/    clip rendering, mixing, subtitle burn-in (MADs and motion comics)
+
+  anime/     the ingest pipeline: shots, content filter, faces, lines, scenes, voice stems, motion, report
+  voice/     speakers, transcripts, voice banks, training (external engines), inference
+  mad/       song analysis, edit plans, arrangement, MAD output
+  comic/     screenshot to script (vision model plus the cast) to voiced audio
+  server/    the HTTP service the phone sends screenshots to
+  api.py     the agent-facing JSON API (an MCP server can wrap it)
+  cli.py     the `tokimeki` command
+clients/     phone-side capture: the iOS Shortcut recipe, later an Android floating button
+```
+
+The flow: `anime` ingests a series → `voice` builds banks and trains models → `server` takes a screenshot from a client, `comic` scripts it with the cast and voices it. `mad` builds on `anime`, `cast` and `render`.
+
 ## Models
 
 Weights come from the Hugging Face Hub on first use (into the HF cache); the code that touches them lives in `src/tokimeki/models/`.
