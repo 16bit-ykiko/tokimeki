@@ -384,6 +384,11 @@ def write_plan(plan: Plan, path: Path) -> None:
     path.write_text(plan.to_json(), encoding="utf-8")
 
 
+def good_name(name: str) -> bool:
+    """A MAD name is one directory under the series' `mads/`."""
+    return bool(name) and not name.startswith(".") and "/" not in name and "\\" not in name
+
+
 def mad_dir(series: Path, name: str) -> Path:
     return series / ".tokimeki" / "mads" / name
 

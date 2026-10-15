@@ -64,14 +64,18 @@ def window(candidate: Candidate, seconds: float) -> tuple[float, float]:
     return start, speed
 
 
+FRAME_SLACK = Fraction(1, 100)
+"""Frames a time may be off its frame boundary: plans keep 4 decimals, up to 0.0012 frames."""
+
+
 def frame_floor(seconds: float, fps: Fraction) -> float:
     """The start of the source frame `seconds` falls in."""
-    return float(math.floor(Fraction(seconds) * fps + Fraction(1, 1000)) / fps)
+    return float(math.floor(Fraction(seconds) * fps + FRAME_SLACK) / fps)
 
 
 def frame_ceil(seconds: float, fps: Fraction) -> float:
     """The first frame boundary at or after `seconds`."""
-    return float(math.ceil(Fraction(seconds) * fps - Fraction(1, 1000)) / fps)
+    return float(math.ceil(Fraction(seconds) * fps - FRAME_SLACK) / fps)
 
 
 @dataclass(frozen=True, slots=True)

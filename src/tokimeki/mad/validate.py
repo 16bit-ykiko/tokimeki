@@ -15,7 +15,7 @@ from tokimeki.library.episodes import find_episode, get_episode
 from tokimeki.library.lines import get_line, list_parts, shots_in_parts
 from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus
 from tokimeki.library.shots import get_shot, kept_ranges
-from tokimeki.mad.fx import STRONG_ACCENT
+from tokimeki.mad.fx import STRONG_ACCENT, strongest
 from tokimeki.mad.plan import (
     FLASH_FRAME_RANGE,
     FX_KINDS,
@@ -25,6 +25,7 @@ from tokimeki.mad.plan import (
     Plan,
     SlotPlan,
     VoicePlan,
+    good_name,
 )
 from tokimeki.mad.refine import beat_grid, edge, nearest
 from tokimeki.mad.song.analysis import SongAnalysis
@@ -278,6 +279,10 @@ def _punch(
     i: int, slot: SlotPlan, at: float | None, analysis: SongAnalysis, fps: Fraction
 ) -> list[Issue]:
     if at is None:
+        if slot.accent is None and strongest(analysis, slot) is None:
+            return [
+                _error("fx.accent", i, f"no beat inside the slot hits {STRONG_ACCENT} to punch on")
+            ]
         return [_warning("fx.at", i, "punch has no beat yet; `plan refine` picks the strongest")]
     if not slot.start + 2 / fps <= at < slot.end - 1 / fps:
         return [_error("fx.at", i, f"punch at {at:.3f}s is not inside the slot")]
@@ -444,8 +449,10 @@ def validate(
     recurring: Mapping[int, Repeat] | None = None,
 ) -> list[Issue]:
     issues: list[Issue] = []
+    if not good_name(plan.name):
+        issues.append(_error("plan.name", None, f"{plan.name!r} cannot name a directory"))
     if not plan.slots:
-        return [_error("slots.empty", None, "the plan has no slots")]
+        return [*issues, _error("slots.empty", None, "the plan has no slots")]
     if analysis is None:
         issues.append(_error("song.unknown", None, f"song {plan.song!r} has not been analysed"))
     else:

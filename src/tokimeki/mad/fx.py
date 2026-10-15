@@ -60,6 +60,12 @@ def strong_accents(
     ]
 
 
+def strongest(analysis: SongAnalysis, slot: SlotPlan) -> float | None:
+    """The strongest accent a punch may land on inside the slot, if one hits hard enough."""
+    inside = strong_accents(analysis, slot.start + PUNCH_MARGIN, slot.end - PUNCH_MARGIN)
+    return max(inside, key=lambda a: a[1])[0] if inside else None
+
+
 def _source_time(slot: SlotPlan, t: float) -> float | None:
     """The episode second shown at song second `t` of the slot."""
     speed = slot.derived_speed
@@ -79,7 +85,8 @@ def _focus(
 
 def resolve(fx: Fx, slot: SlotPlan, candidate: Candidate | None, analysis: SongAnalysis) -> Fx:
     """The effect with what it leaves out filled in: a punch on the slot's `accent` or its
-    strongest beat, zooms toward her face in the window, and the default sizes."""
+    strongest accent (none when no beat inside hits `STRONG_ACCENT`), zooms toward her face
+    in the window, and the default sizes."""
     if fx.kind == "flash":
         return replace(
             fx,
@@ -91,10 +98,7 @@ def resolve(fx: Fx, slot: SlotPlan, candidate: Candidate | None, analysis: SongA
         if at is None:
             at = slot.accent
         if at is None:
-            inside = strong_accents(
-                analysis, slot.start + PUNCH_MARGIN, slot.end - PUNCH_MARGIN, minimum=0.0
-            )
-            at = max(inside, key=lambda a: a[1])[0] if inside else None
+            at = strongest(analysis, slot)
         focus = fx.focus
         if focus is None and at is not None:
             moment = _source_time(slot, at)

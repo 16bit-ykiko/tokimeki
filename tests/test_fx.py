@@ -13,7 +13,7 @@ from tokimeki.mad.candidates import Candidate, FramePoint
 from tokimeki.mad.fx import ClipFx, clip_fx, suggest, zoom_filter
 from tokimeki.mad.motion import Onset, ShotMotion
 from tokimeki.mad.plan import Fx, Plan, PlanFormatError, SlotPlan
-from tokimeki.mad.refine import refine
+from tokimeki.mad.refine import frame_floor, refine
 from tokimeki.mad.render import clip_key
 from tokimeki.mad.song.analysis import SongAnalysis
 from tokimeki.mad.validate import validate
@@ -162,3 +162,22 @@ def test_validate_knows_fx_and_punches_only_on_accents() -> None:
         assert not [
             i for i in validate(conn, replace(plan, slots=[good]), analysis) if "fx" in i.code
         ]
+
+
+def test_a_refined_window_stays_on_its_frame() -> None:
+    fps = Fraction(24000, 1001)
+    for frame in range(30000, 31000):
+        start = round(float(frame / fps), 4)
+        assert frame_floor(start, fps) == pytest.approx(float(frame / fps), abs=1e-9)
+
+
+def test_a_punch_needs_a_strong_accent() -> None:
+    analysis = song(0.5, 20.0)
+    slot = SlotPlan(12.0, 14.0, 2, fx=[Fx("punch")])
+    (refined,) = refine(Plan("p", "/s", "c", "x", [slot]), analysis, {})[0].slots
+    assert refined.fx[0].at is None
+    with open_library(":memory:") as conn:
+        issues = validate(conn, Plan("p", "/s", "c", "x", [slot]), analysis)
+    assert [(i.code, i.level) for i in issues if i.code.startswith("fx.")] == [
+        ("fx.accent", "error")
+    ]
