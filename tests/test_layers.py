@@ -1,5 +1,5 @@
-"""The package's dependencies point one way: cli -> api -> mad, voice -> anime -> cast -> models,
-media, library."""
+"""The package's dependencies point one way: cli -> api -> mad, voice -> anime -> cast, render
+-> models, media, library. Shared packages never import a product line."""
 
 import ast
 from pathlib import Path
@@ -8,52 +8,28 @@ import pytest
 
 PACKAGE = Path(__file__).parents[1] / "src" / "tokimeki"
 
+TOP = {"api", "cli", "selfcheck"}
+PRODUCTS = {"anime", "voice", "mad", "comic", "server"}
+ABOVE = PRODUCTS | TOP
+
 FORBIDDEN = {
-    "models": {
-        "cast",
-        "render",
-        "library",
-        "anime",
-        "cli",
-        "media",
-        "mad",
-        "api",
-        "voice",
-    },
-    "media": {
-        "cast",
-        "render",
-        "library",
-        "anime",
-        "cli",
-        "models",
-        "mad",
-        "api",
-        "voice",
-    },
-    "library": {
-        "cast",
-        "render",
-        "anime",
-        "cli",
-        "models",
-        "media",
-        "mad",
-        "api",
-        "voice",
-    },
-    "cast": {"render", "anime", "cli", "mad", "api", "voice"},
-    "render": {"cast", "anime", "cli", "mad", "api", "voice"},
-    "anime": {"cli", "mad", "api", "voice"},
-    "mad": {"cli", "api", "voice"},
-    "voice": {"cli", "mad", "api"},
+    "models": {"media", "library", "cast", "render"} | ABOVE,
+    "media": {"models", "library", "cast", "render"} | ABOVE,
+    "library": {"models", "media", "cast", "render"} | ABOVE,
+    "cast": {"render"} | ABOVE,
+    "render": {"cast"} | ABOVE,
+    "anime": {"voice", "mad", "comic", "server"} | TOP,
+    "voice": {"mad", "comic", "server"} | TOP,
+    "mad": {"voice", "comic", "server"} | TOP,
 }
 
 
 def _imports(path: Path) -> set[str]:
     found: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.ImportFrom) and node.module:
+        if isinstance(node, ast.ImportFrom) and node.module == "tokimeki":
+            found.update(f"tokimeki.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
             found.add(node.module)
         elif isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
@@ -65,3 +41,8 @@ def test_layer_imports(layer: str) -> None:
     for path in (PACKAGE / layer).rglob("*.py"):
         bad = _imports(path) & FORBIDDEN[layer]
         assert not bad, f"{path.relative_to(PACKAGE)} imports {sorted(bad)}"
+
+
+def test_every_package_has_a_layer() -> None:
+    packages = {p.parent.name for p in PACKAGE.glob("*/__init__.py")}
+    assert packages <= FORBIDDEN.keys()
