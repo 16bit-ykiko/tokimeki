@@ -2,30 +2,38 @@
 
 ## Code layout
 
-Dependencies point one way: `cli` → `api` → `mad`, `voice` → `stages`, `song` → `models`, `media`, `library` (and `report` → `library`, `media`). A test fails if a lower layer imports a higher one.
+Dependencies point one way: `cli` → `api` → `mad`, `voice` → `anime` → `cast`, `render` → `models`, `media`, `library`. The shared packages (`cast`, `library`, `media`, `models`, `render`) never import a product line (`anime`, `voice`, `mad`); `voice` and `mad` both build on `anime`, never on each other. A test fails if a lower layer imports a higher one or a package has no layer.
 
 ```
 src/tokimeki/
   cli.py        the `tokimeki` command
   api.py        the agent-facing API: JSON in and out (the CLI prints it; an MCP server can wrap it)
-  paths.py      where a series keeps its library, cache and report
-  library/      SQLite: schema and migrations, typed records, queries
+  selfcheck.py  `tokimeki gpu-check`: NVDEC, PyTorch and onnxruntime each prove they run on the GPU
+
+  cast/         who each character is: face clusters from CCIP embeddings, their names, per-shot
+                fixes and doubtful shots (no GPU); the average-linkage clustering speakers use too
+  library/      SQLite: schema and migrations, typed records, queries; where a series keeps its
+                library, cache and report (`paths.py`), and an open series (`series.py`)
   media/        ffprobe, NVDEC decoding and frame extraction, audio, subtitles, cue sheets
   models/       the only place third-party models and untyped libraries are touched:
                 typed wrappers, GPU lifecycle (one model at a time), no CPU fallback
-  stages/       pipeline stages (shots, content filter, cast, lines, scenes); idempotent, resumable
-  song/         song analysis: beats, bars, vocal line, sections, excerpt, slots, lyrics
-  mad/          edit plans: context, schema, validation, refinement, draft arranger, render, report
-  report/       the static HTML report of a series
-  voice/        speakers (clips, embeddings, clusters, naming) and their listening page; self-contained,
-                its own model wrapper and library queries included, so it moves as one piece
+  render/       preview and final encoder settings, subtitle fonts and burn-in, the voice-over-song mix
+
+  anime/        the ingest pipeline, idempotent and resumable: shots, content filter, faces (the `cast`
+                stage), lines, scenes, voice stems (`stems.py`, the `voice` stage), motion;
+                `report/` is the static HTML report of a series
+  voice/        speakers (clips, embeddings, clusters, naming) and their listening page, with their
+                speaker-embedding model (on `models/ort.py`) and voice tables
+  mad/          `song/` analysis (beats, bars, vocal line, sections, excerpt, slots, lyrics); edit plans
+                (context, schema, validation, refinement, draft arranger); the MAD's clips, sound,
+                subtitles and timeline (`render.py`, on `render/`); its report
 ```
 
-Planned: transcripts, voice banks and voice models in `voice/`, and `comic/` (page scripts and voicing, behind the screenshot service), on the same layering.
+A MAD's clips are rendered in `mad/render.py`, not `render/`: each is cut from an episode by a plan's slot. Planned: transcripts, voice banks and voice models in `voice/`; `comic/`, `server/`, `clients/` and `web/` below.
 
 ## Target layout
 
-Decided, not yet applied: the existing modules move once the voice work on `voice/bank` is merged. Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
+Applied; `comic/`, `server/`, `clients/` and `web/` are not built yet. Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
 
 ```
 src/tokimeki/
@@ -33,7 +41,7 @@ src/tokimeki/
   library/   SQLite: schema and migrations, typed records, queries
   media/     decoding, audio, subtitles, cue sheets
   models/    typed GPU model wrappers, one model on the GPU at a time
-  render/    clip rendering, mixing, subtitle burn-in (MADs and motion comics)
+  render/    encoding, mixing, subtitle burn-in (MADs and motion comics)
 
   anime/     the ingest pipeline: shots, content filter, faces, lines, scenes, voice stems, motion, report
   voice/     speakers, transcripts, voice banks, training (external engines), inference
@@ -48,11 +56,11 @@ web/         local web UI in TypeScript (React, Vite, strict), served by `server
 
 The flow: `anime` ingests a series → `voice` builds banks and trains models → `server` takes a screenshot from a client, `comic` scripts it with the cast and voices it. `mad` builds on `anime`, `cast` and `render`.
 
-Computation stays in Python; interaction moves to `web/`: browsing the scene library, naming and fixing the cast and speakers, listening to voice samples, reviewing MAD plans. The UI talks only to the JSON API that `server/` exposes over `api.py`, and its types are generated from the same JSON Schemas (the plan schema first), so both sides cannot drift. pixi installs Node.js and pnpm, and `pixi run check` adds `tsc --noEmit` and lint. It is built after the voice work and the layout move; until then pages stay static HTML.
+Computation stays in Python; interaction moves to `web/`: browsing the scene library, naming and fixing the cast and speakers, listening to voice samples, reviewing MAD plans. The UI talks only to the JSON API that `server/` exposes over `api.py`, and its types are generated from the same JSON Schemas (the plan schema first), so both sides cannot drift. pixi installs Node.js and pnpm, and `pixi run check` adds `tsc --noEmit` and lint. It is built after the voice work; until then pages stay static HTML.
 
 ## Models
 
-Weights come from the Hugging Face Hub on first use (into the HF cache); the code that touches them lives in `src/tokimeki/models/`.
+Weights come from the Hugging Face Hub on first use (into the HF cache); the code that touches them lives in `src/tokimeki/models/` (the speaker embedding in `voice/embedding.py`).
 
 | Stage | Model | Runs on |
 |---|---|---|
