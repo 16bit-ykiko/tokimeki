@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
 
-from tokimeki.anime import motion, stems
+from tokimeki.anime import motion, repeats, stems
 from tokimeki.anime.pipeline import register_episodes
 from tokimeki.anime.stems import voice_bounds
 from tokimeki.library.episodes import find_episode, get_episode, stage_done
@@ -255,7 +255,7 @@ def plan_validate(plan: str | Json) -> Json:
         analysis = with_accents(load_analysis(parsed.song)) if parsed.song else None
     except (SongError, AudioError):
         analysis = None
-    return _report(parsed, validate(ctx.conn, parsed, analysis))
+    return _report(parsed, validate(ctx.conn, parsed, analysis, repeats.update(ctx)))
 
 
 def _refined(plan: Plan) -> tuple[Context, Plan, SongAnalysis, dict[int, Candidate], list[str]]:
@@ -430,6 +430,17 @@ def render_plan(plan: str, quality: str = "preview", otio: bool = False, subs: s
         "seconds": timings,
         "refined": notes,
         "plan": str(out_dir / "plan.json"),
+    }
+
+
+def series_repeats(series: str) -> Json:
+    """Shots that recur across episodes (OP/ED, title cards, previews, recaps): counts per
+    kind and episode, and each marked shot with the shots it matches."""
+    ctx = _series(series)
+    marks = repeats.update(ctx)
+    return {
+        **repeats.summary(ctx, marks),
+        "shots": {str(s): asdict(r) for s, r in sorted(marks.items())},
     }
 
 

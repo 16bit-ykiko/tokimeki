@@ -5,9 +5,11 @@ code, so an agent can fix plans mechanically.
 """
 
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from fractions import Fraction
 
+from tokimeki.anime.repeats import Repeat
 from tokimeki.library.cast import named_cast_by_shot
 from tokimeki.library.episodes import find_episode, get_episode
 from tokimeki.library.lines import get_line, list_parts, shots_in_parts
@@ -299,7 +301,9 @@ def _punch(
     return []
 
 
-def _shot_issues(conn: sqlite3.Connection, plan: Plan) -> list[Issue]:
+def _shot_issues(
+    conn: sqlite3.Connection, plan: Plan, recurring: Mapping[int, Repeat]
+) -> list[Issue]:
     issues: list[Issue] = []
     episodes: dict[int, Episode] = {}
     parts: dict[int, dict[int, str]] = {}
@@ -341,6 +345,16 @@ def _shot_issues(conn: sqlite3.Connection, plan: Plan) -> list[Issue]:
         if slot.shot in parts[shot.episode_id]:
             kind = "opening" if parts[shot.episode_id][slot.shot] == "op" else "ending"
             issues.append(_warning("shot.in_op_ed", i, f"shot {slot.shot} is part of the {kind}"))
+        elif slot.shot in recurring:
+            mark = recurring[slot.shot]
+            like = ", ".join(str(s) for s in mark.like) or "its neighbours"
+            issues.append(
+                _warning(
+                    "shot.recurring",
+                    i,
+                    f"shot {slot.shot} recurs in other episodes ({mark.kind}; like {like})",
+                )
+            )
         if plan.character and plan.character not in cast.get(slot.shot, set()):
             issues.append(
                 _warning(
@@ -423,7 +437,12 @@ def _window(
     return issues
 
 
-def validate(conn: sqlite3.Connection, plan: Plan, analysis: SongAnalysis | None) -> list[Issue]:
+def validate(
+    conn: sqlite3.Connection,
+    plan: Plan,
+    analysis: SongAnalysis | None,
+    recurring: Mapping[int, Repeat] | None = None,
+) -> list[Issue]:
     issues: list[Issue] = []
     if not plan.slots:
         return [_error("slots.empty", None, "the plan has no slots")]
@@ -433,4 +452,4 @@ def validate(conn: sqlite3.Connection, plan: Plan, analysis: SongAnalysis | None
         issues += _timing(plan, analysis)
         for i, slot in enumerate(plan.slots):
             issues += _effects(i, slot, analysis, plan.frame_rate)
-    return issues + _shot_issues(conn, plan) + _voices(conn, plan, analysis)
+    return issues + _shot_issues(conn, plan, recurring or {}) + _voices(conn, plan, analysis)

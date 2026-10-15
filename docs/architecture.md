@@ -20,7 +20,8 @@ src/tokimeki/
   render/       preview and final encoder settings, subtitle fonts and burn-in, the voice-over-song mix
 
   anime/        the ingest pipeline, idempotent and resumable: shots, content filter, faces (the `cast`
-                stage), lines, scenes, voice stems (`stems.py`, the `voice` stage), motion;
+                stage), lines, scenes, voice stems (`stems.py`, the `voice` stage), motion; shots
+                that recur across episodes (`repeats.py`);
                 `report/` is the static HTML report of a series
   voice/        speakers (clips, embeddings, clusters, naming) and their listening page, with their
                 speaker-embedding model (on `models/ort.py`) and voice tables

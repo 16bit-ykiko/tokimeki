@@ -190,6 +190,8 @@ def build_context(
             "edge_frames": EDGE_FRAMES,
             "fps": DEFAULT_FPS,
             "kept_shots_only": True,
+            "no_recurring": "the OP/ED and shots found in other episodes (title cards,"
+            " next-episode previews, recaps) are left out",
             "each_shot_once": True,
             "voices": "inside song gaps (no sung lyrics) unless force; never from dropped shots;"
             f" the song ducks {DUCK_DB:g} dB under each",

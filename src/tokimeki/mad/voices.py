@@ -1,13 +1,15 @@
 """Original lines laid over the song: which may be used, and where their voice really is.
 
-A line may be used only when kept shots cover all of it and it is outside the OP/ED; the
-voice stem is silent elsewhere anyway. Speakers are unknown (the subtitles carry none), so
+A line may be used only when kept shots cover all of it and it is outside the OP/ED and the
+shots that recur from other episodes (a preview's line is said again in the next episode); the
+voice stem is silent outside kept shots anyway. Speakers are unknown (the subtitles carry none), so
 who is on screen while a line is said is listed for the arranger to judge.
 """
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
+from tokimeki.anime import repeats
 from tokimeki.anime.stems import voice_bounds
 from tokimeki.library.cast import named_cast_by_shot
 from tokimeki.library.episodes import get_episode
@@ -39,17 +41,27 @@ def covered(ranges: list[tuple[float, float]], start: float, end: float) -> bool
 
 
 def usable_lines(ctx: Context, episode: Episode) -> list[VoiceLine]:
-    """Dialogue lines wholly inside kept shots and outside the OP/ED, at most `MAX_VOICE` long."""
+    """Dialogue lines wholly inside kept shots, outside the OP/ED and the recurring shots, at
+    most `MAX_VOICE` long."""
     kept = kept_ranges(ctx.conn, episode)
     parts = list_parts(ctx.conn, episode.id)
     in_parts = shots_in_parts(ctx.conn, episode.id)
-    shots = [s for s in list_shots(ctx.conn, episode.id, ShotStatus.KEPT) if s.id not in in_parts]
+    recurring = repeats.update(ctx)
+    every = list_shots(ctx.conn, episode.id, ShotStatus.KEPT)
+    again = [
+        (episode.seconds(s.start_frame), episode.seconds(s.end_frame))
+        for s in every
+        if s.id in recurring
+    ]
+    shots = [s for s in every if s.id not in in_parts]
     cast = named_cast_by_shot(ctx.conn, episode.id)
     out: list[VoiceLine] = []
     for line in list_lines(ctx.conn, episode.id, LineKind.DIALOGUE):
         if line.end - line.start > MAX_VOICE or not covered(kept, line.start, line.end):
             continue
         if any(p.start < line.end and line.start < p.end for p in parts):
+            continue
+        if any(a < line.end and line.start < b for a, b in again):
             continue
         over = [
             s.id

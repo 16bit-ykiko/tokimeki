@@ -1,5 +1,6 @@
-"""The shots a MAD may use: kept shots of the character, outside the OP/ED, with what makes
-each one cute (expression tags per sampled frame) and where in the shot that peaks.
+"""The shots a MAD may use: kept shots of the character, outside the OP/ED and not recurring
+from other episodes (title cards, previews, recaps), with what makes each one cute (expression
+tags per sampled frame) and where in the shot that peaks.
 
 Only kept shots ever become candidates, so only they can reach a cloud model.
 """
@@ -8,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
+from tokimeki.anime import repeats
 from tokimeki.library.cast import named_cast_by_shot, named_faces
 from tokimeki.library.lines import lines_by_shot, shots_in_parts
 from tokimeki.library.records import Episode, Shot, ShotStatus, TagStat
@@ -134,6 +136,7 @@ def find_candidates(
     only: Sequence[int] | None = None,
 ) -> list[Candidate]:
     """Candidate shots; with `only`, exactly those kept shots (by id), whoever is in them."""
+    recurring = repeats.update(ctx) if only is None else {}
     out: list[Candidate] = []
     for episode in episodes:
         cast = named_cast_by_shot(ctx.conn, episode.id)
@@ -151,7 +154,12 @@ def find_candidates(
             if only is not None:
                 if shot.id not in only:
                     continue
-            elif target is None or target.presence < min_presence or shot.id in parts:
+            elif (
+                target is None
+                or target.presence < min_presence
+                or shot.id in parts
+                or shot.id in recurring
+            ):
                 continue
             if (
                 episode.seconds(shot.end_frame) - episode.seconds(shot.start_frame)

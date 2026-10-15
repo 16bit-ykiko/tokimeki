@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki import api
-from tokimeki.anime import pipeline, scenes
+from tokimeki.anime import pipeline, repeats, scenes
 from tokimeki.anime.pipeline import register_episodes
 from tokimeki.anime.report import build_report
 from tokimeki.cast import clusters
@@ -67,10 +67,17 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         pipeline.redo(ctx, episodes, redo)
     until: str = args.until
     pipeline.run(ctx, episodes, until)
+    marks = repeats.update(ctx)
+    print(f"recurring shots: {len(marks)}")
     no_report: bool = args.no_report
     if not no_report:
         print(f"report: {build_report(ctx.conn, ctx.paths)}")
     return 0
+
+
+def cmd_repeats(args: argparse.Namespace) -> int:
+    series = str(_series(args))
+    return _emit(lambda: api.series_repeats(series))
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -519,6 +526,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         help="burn in lyrics and spoken lines, lyrics only, or nothing",
     )
+
+    recurring = command(
+        "repeats", cmd_repeats, "shots that recur across episodes: OP/ED, previews, recaps (JSON)"
+    )
+    recurring.add_argument("series", help="the series directory holding the episodes")
 
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")
