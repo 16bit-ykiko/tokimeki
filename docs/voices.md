@@ -9,7 +9,7 @@ pixi run tokimeki ingest ~/anime/<series>            # the voice stems come from
 pixi run tokimeki voice speakers ~/anime/<series>    # cut, embed and cluster every line (GPU)
 pixi run tokimeki voice list ~/anime/<series>        # speakers, minutes, seeds, suggestions
 pixi run tokimeki voice page ~/anime/<series>        # the listening page, then:
-pixi run tokimeki voice serve ~/anime/<series>       # http://127.0.0.1:8770/page/ (localhost only)
+pixi run tokimeki serve                              # http://127.0.0.1:8780/voice/<series>/page/ (localhost only)
 pixi run tokimeki voice accept ~/anime/<series>      # name speakers by their suggestion
 pixi run tokimeki voice name|merge|move|fixes|recluster|lines …   # correct by ear
 ```

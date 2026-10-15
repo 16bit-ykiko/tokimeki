@@ -11,14 +11,15 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
 
-from tokimeki.anime import motion, repeats, stems
+from tokimeki.anime import motion, proxy, repeats, stems
 from tokimeki.anime.pipeline import register_episodes
 from tokimeki.anime.stems import voice_bounds
-from tokimeki.library.episodes import find_episode, get_episode, stage_done
-from tokimeki.library.lines import list_lines
+from tokimeki.library.cast import named_cast_by_shot
+from tokimeki.library.episodes import find_episode, get_episode, list_episodes, stage_done
+from tokimeki.library.lines import list_lines, list_parts
 from tokimeki.library.records import Episode, LineKind
 from tokimeki.library.series import Context, open_series
-from tokimeki.library.shots import get_shot
+from tokimeki.library.shots import get_shot, list_shots
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
@@ -430,6 +431,101 @@ def render_plan(plan: str, quality: str = "preview", otio: bool = False, subs: s
         "seconds": timings,
         "refined": notes,
         "plan": str(out_dir / "plan.json"),
+    }
+
+
+def _episode_json(ctx: Context, e: Episode) -> Json:
+    return {
+        "id": e.id,
+        "path": e.path,
+        "fps": f"{e.fps.numerator}/{e.fps.denominator}",
+        "frames": e.frame_count,
+        "seconds": round(e.seconds(e.frame_count), 3),
+        "stages": [
+            row[0]
+            for row in ctx.conn.execute(
+                "SELECT stage FROM stage_runs WHERE episode_id = ? ORDER BY finished_at", (e.id,)
+            ).fetchall()
+        ],
+        "parts": [
+            {"kind": p.kind.value, "start": p.start, "end": p.end}
+            for p in list_parts(ctx.conn, e.id)
+        ],
+    }
+
+
+def series_episodes(series: str) -> Json:
+    """The series' registered episodes: path, frame rate, length, finished stages, OP/ED."""
+    ctx = _series(series)
+    return {"episodes": [_episode_json(ctx, e) for e in list_episodes(ctx.conn)]}
+
+
+def _episode(ctx: Context, episode: int) -> Episode:
+    try:
+        return get_episode(ctx.conn, episode)
+    except KeyError as error:
+        raise ApiError(f"no episode {episode} in {ctx.paths.root}") from error
+
+
+def series_episode(series: str, episode: int) -> Json:
+    """One episode with every shot: its time range, whether it was kept, the named cast seen
+    in it and, when it recurs in other episodes, how. Dropped shots carry nothing more."""
+    ctx = _series(series)
+    e = _episode(ctx, episode)
+    cast_of = named_cast_by_shot(ctx.conn, e.id)
+    marks = repeats.update(ctx)
+    shots: list[Json] = []
+    for s in list_shots(ctx.conn, e.id):
+        shot: Json = {
+            "id": s.id,
+            "start": round(e.seconds(s.start_frame), 3),
+            "end": round(e.seconds(s.end_frame), 3),
+            "status": s.status.value,
+        }
+        if s.status.value == "kept":
+            shot["cast"] = {name: round(c.presence, 2) for name, c in cast_of.get(s.id, [])}
+            if s.id in marks:
+                shot["recurs"] = marks[s.id].kind
+        shots.append(shot)
+    return {**_episode_json(ctx, e), "shots": shots}
+
+
+def episode_media(series: str, episode: int) -> Json:
+    """Where an episode's browser media are: the proxy (black and silent outside kept shots;
+    None until `tokimeki proxy` made it) and the voice stem (silent outside kept shots)."""
+    ctx = _series(series)
+    e = _episode(ctx, episode)
+    video = proxy.proxy_path(ctx.paths, e.id)
+    voice = stems.stem_path(ctx.paths, e.id)
+    return {
+        "video": str(video) if video.exists() else None,
+        "voice": str(voice) if voice.exists() else None,
+    }
+
+
+def make_proxies(series: str, episodes: Sequence[str] | None = None) -> Json:
+    """Browser-playable copies of the episodes that have been filtered (GPU)."""
+    ctx = _series(series)
+    made: list[str] = []
+    for e in _episodes(ctx, episodes):
+        if stage_done(ctx.conn, e.id, "filter"):
+            try:
+                made.append(str(proxy.make_proxy(ctx, e)))
+            except proxy.ProxyError as error:
+                raise ApiError(str(error)) from error
+    return {"proxies": made}
+
+
+def series_mads(series: str) -> Json:
+    """The MADs of the series: name and the outputs each has."""
+    ctx = _series(series)
+    root = mad_dir(ctx.paths.root, "")
+    names = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    return {
+        "mads": [
+            {"name": n, "files": sorted(f.name for f in (root / n).iterdir() if f.is_file())}
+            for n in names
+        ]
     }
 
 

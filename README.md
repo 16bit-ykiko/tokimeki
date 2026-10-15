@@ -32,6 +32,7 @@ Cutting a MAD is a handful of JSON commands an agent (or you) drives: see [MAD](
 - [Character voices](docs/voices.md): speakers (working), transcripts, voice banks, voice models.
 - [Manga and novels, voiced](docs/comics.md) (planned): the screenshot service, page scripts, voicing.
 - [Setup](docs/setup.md): environment, GPU rules, hardware and cost, where data lives.
+- [Server](docs/server.md): the local HTTP service, its JSON API and media.
 - [Architecture](docs/architecture.md): code layout and the models used.
 
 ## Personal use only

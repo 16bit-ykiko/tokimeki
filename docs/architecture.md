@@ -2,7 +2,7 @@
 
 ## Code layout
 
-Dependencies point one way: `cli` → `api` → `mad`, `voice` → `anime` → `cast`, `render` → `models`, `media`, `library`. The shared packages (`cast`, `library`, `media`, `models`, `render`) never import a product line (`anime`, `voice`, `mad`); `voice` and `mad` both build on `anime`, never on each other. A test fails if a lower layer imports a higher one or a package has no layer.
+Dependencies point one way: `cli` → `server` → `api` → `mad`, `voice` → `anime` → `cast`, `render` → `models`, `media`, `library`. The shared packages (`cast`, `library`, `media`, `models`, `render`) never import a product line (`anime`, `voice`, `mad`); `voice` and `mad` both build on `anime`, never on each other. A test fails if a lower layer imports a higher one or a package has no layer.
 
 ```
 src/tokimeki/
@@ -21,20 +21,21 @@ src/tokimeki/
 
   anime/        the ingest pipeline, idempotent and resumable: shots, content filter, faces (the `cast`
                 stage), lines, scenes, voice stems (`stems.py`, the `voice` stage), motion; shots
-                that recur across episodes (`repeats.py`);
-                `report/` is the static HTML report of a series
+                that recur across episodes (`repeats.py`); browser proxies of the episodes
+                (`proxy.py`); `report/` is the static HTML report of a series
   voice/        speakers (clips, embeddings, clusters, naming) and their listening page, with their
                 speaker-embedding model (on `models/ort.py`) and voice tables
   mad/          `song/` analysis (beats, bars, vocal line, sections, excerpt, slots, lyrics); edit plans
                 (context, schema, validation, refinement, draft arranger); the MAD's clips, sound,
-                subtitles and timeline (`render.py`, on `render/`); its report
+                subtitles and timeline (`render.py`, on `render/`); effects (`fx.py`); its report
+  server/       the local HTTP service over `api.py` (see [Server](server.md))
 ```
 
-A MAD's clips are rendered in `mad/render.py`, not `render/`: each is cut from an episode by a plan's slot. Planned: transcripts, voice banks and voice models in `voice/`; `comic/`, `server/`, `clients/` and `web/` below.
+A MAD's clips are rendered in `mad/render.py`, not `render/`: each is cut from an episode by a plan's slot. Planned: transcripts, voice banks and voice models in `voice/`; `comic/`, `clients/` and `web/` below, and the screenshot route of `server/`.
 
 ## Target layout
 
-Applied; `comic/`, `server/`, `clients/` and `web/` are not built yet. Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
+Applied; `comic/`, `clients/` and `web/` are not built yet, and `server/` is a skeleton (the JSON API and media, no screenshots). Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
 
 Where the modules went, for porting branches made before the move (stage names, CLI commands and JSON are unchanged):
 
@@ -66,7 +67,7 @@ src/tokimeki/
   voice/     speakers, transcripts, voice banks, training (external engines), inference
   mad/       song analysis, edit plans, arrangement, MAD output
   comic/     screenshot to script (vision model plus the cast) to voiced audio
-  server/    the HTTP service the phone sends screenshots to
+  server/    the local HTTP service: the JSON API, media, pages; later the phone's screenshots
   api.py     the agent-facing JSON API (an MCP server can wrap it)
   cli.py     the `tokimeki` command
 clients/     phone-side capture: the iOS Shortcut recipe, later an Android floating button

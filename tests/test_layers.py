@@ -1,5 +1,5 @@
-"""The package's dependencies point one way: cli -> api -> mad, voice -> anime -> cast, render
--> models, media, library. Shared packages never import a product line."""
+"""The package's dependencies point one way: cli -> server -> api -> mad, voice -> anime -> cast,
+render -> models, media, library. Shared packages never import a product line."""
 
 import ast
 from pathlib import Path
@@ -21,6 +21,7 @@ FORBIDDEN = {
     "anime": {"voice", "mad", "comic", "server"} | TOP,
     "voice": {"mad", "comic", "server"} | TOP,
     "mad": {"voice", "comic", "server"} | TOP,
+    "server": {"cli", "selfcheck"},
 }
 
 

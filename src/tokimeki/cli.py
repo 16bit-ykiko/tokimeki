@@ -14,12 +14,12 @@ from tokimeki.anime.report import build_report
 from tokimeki.cast import clusters
 from tokimeki.library.episodes import list_episodes
 from tokimeki.library.lines import get_line
+from tokimeki.library.paths import data_root
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context, open_series
 from tokimeki.selfcheck import run_checks
+from tokimeki.server.app import LOOPBACK, find_series, serve
 from tokimeki.voice import speakers
-from tokimeki.voice.page import serve
-from tokimeki.voice.paths import voice_dir
 from tokimeki.voice.store import (
     clean_voices,
     find_speaker,
@@ -410,11 +410,32 @@ def cmd_voice_page(args: argparse.Namespace) -> int:
     return _emit(lambda: api.voice_page(series))
 
 
-def cmd_voice_serve(args: argparse.Namespace) -> int:
+def cmd_proxy(args: argparse.Namespace) -> int:
+    series = str(_series(args))
+    episodes: list[str] | None = args.episode
+    return _emit(lambda: api.make_proxies(series, episodes))
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    given: list[str] = args.series
+    host: str = args.host
     port: int = args.port
-    root = voice_dir(open_series(_series(args)).paths)
-    print(f"serving {root} on http://127.0.0.1:{port}/ (the speakers page is page/)")
-    serve(root, port)
+    if given:
+        paths = [Path(s).expanduser().resolve() for s in given]
+        series = {p.name: p for p in paths}
+        if len(series) < len(paths):
+            print("error: two series with the same directory name", file=sys.stderr)
+            return 1
+    else:
+        series = find_series(data_root())
+    if not series:
+        print(f"error: no series under {data_root()} (set TOKIMEKI_DATA)", file=sys.stderr)
+        return 1
+    if host not in LOOPBACK:
+        print(f"listening on {host}: the voice pages and stems are not served", file=sys.stderr)
+    for name in series:
+        print(f"http://{host}:{port}/api/{name}/episodes")
+    serve(series, host, port)
     return 0
 
 
@@ -532,6 +553,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     recurring.add_argument("series", help="the series directory holding the episodes")
 
+    proxies = command(
+        "proxy", cmd_proxy, "browser-playable copies of the episodes, for scrubbing (GPU)"
+    )
+    proxies.add_argument("series", help="the series directory holding the episodes")
+    proxies.add_argument("--episode", action="append", help="only episodes containing this")
+
+    server = command(
+        "serve", cmd_serve, "the JSON API, episode media, MAD outputs and pages over HTTP"
+    )
+    server.add_argument(
+        "series", nargs="*", help="series directories (default: all under the data root)"
+    )
+    server.add_argument("--host", default="127.0.0.1", help="listen here (default: localhost only)")
+    server.add_argument("--port", type=int, default=8780)
+
     report = command("report", cmd_report, "rebuild the static HTML report of a series")
     report.add_argument("series", help="the series directory holding the episodes")
 
@@ -625,8 +661,6 @@ def build_parser() -> argparse.ArgumentParser:
     vlines = voice_command("lines", cmd_voice_lines, "a speaker's lines with their subtitles")
     vlines.add_argument("speaker", help="id or name")
     voice_command("page", cmd_voice_page, "write the listening page for naming speakers")
-    vserve = voice_command("serve", cmd_voice_serve, "serve the voice pages on localhost only")
-    vserve.add_argument("--port", type=int, default=8770)
     return parser
 
 

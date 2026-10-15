@@ -1,8 +1,6 @@
 """A static listening page for naming speakers: audio players per speaker, nothing more."""
 
-from functools import partial
 from html import escape
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from tokimeki.voice.review import LineClip, SpeakerReview, VoiceReview
@@ -66,15 +64,3 @@ def write_page(root: Path, series: str, data: VoiceReview) -> Path:
     path = root / "index.html"
     path.write_text(render_page(series, data))
     return path
-
-
-def serve(root: Path, port: int) -> None:
-    """Serve `root` on localhost only (voice data never leaves the machine) until interrupted."""
-    handler = partial(_QuietHandler, directory=str(root))
-    with ThreadingHTTPServer(("127.0.0.1", port), handler) as server:
-        server.serve_forever()
-
-
-class _QuietHandler(SimpleHTTPRequestHandler):
-    def log_message(self, format: str, *args: object) -> None:
-        pass

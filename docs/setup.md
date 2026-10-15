@@ -36,6 +36,7 @@ pixi run test                 # GPU tests are skipped where there is no GPU
       cache/frames/<episode id>/      # sampled frames as JPEG; regenerable, safe to delete
       cache/clips/<hash>.mp4          # rendered clips, reused while their parameters stay the same
       cache/phash/, repeats.json      # frame hashes and the shots that recur across episodes
+      cache/proxy/<episode id>.mp4    # browser copies (`tokimeki proxy`), black outside kept shots
       mads/<name>/                    # plan.json, preview.mp4, final.mp4, lyrics.ass/.srt, timeline.otio, report.html
       fonts/                          # subtitle fonts copied from the system
       subs/                           # subtitle files unpacked from archives (inputs for lyrics)
