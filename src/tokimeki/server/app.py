@@ -3,13 +3,16 @@ browser media and the MAD outputs with HTTP Range (so a browser can scrub), and 
 pages (the voice pages, the series report).
 
 It serves the series under the data root by directory name. On any address but loopback the
-voice pages and the voice stems are left out: voice data never leaves the machine. Routes
+voice pages and the voice stems are left out: voice data never leaves the machine. Requests
+must name the host it listens on (no DNS rebinding) and POSTs must be JSON (no cross-site form
+posts). Calls that may load a GPU model or run ffmpeg on the GPU go one at a time. Routes
 follow docs/design-data-and-labeling.md where that costs nothing: JSON under `/api`, episode
 media under `/media`.
 """
 
 import json
-from collections.abc import Callable, Mapping
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -17,6 +20,8 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
+from starlette.middleware import Middleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import BaseRoute, Route
@@ -110,6 +115,8 @@ class _Body:
 
 
 async def _body(request: Request) -> _Body:
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+        raise HTTPException(415, "send JSON (Content-Type: application/json)")
     raw = await request.body()
     try:
         return _Body(json.loads(raw) if raw else {})
@@ -117,10 +124,21 @@ async def _body(request: Request) -> _Body:
         raise HTTPException(400, f"the body is not JSON: {error}") from error
 
 
-async def _call(run: Callable[[], object]) -> Response:
+_GPU = threading.Lock()
+"""Held by calls that may run a GPU model or NVDEC/NVENC: one at a time, as the GPU rules say."""
+
+
+async def _call(run: Callable[[], object], gpu: bool = False) -> Response:
     """Run an API function off the event loop; its errors become 400 with their details."""
+
+    def guarded() -> object:
+        if not gpu:
+            return run()
+        with _GPU:
+            return run()
+
     try:
-        return JSONResponse(await run_in_threadpool(run))
+        return JSONResponse(await run_in_threadpool(guarded))
     except api.ApiError as error:
         return JSONResponse({"error": str(error), "details": error.details}, status_code=400)
 
@@ -141,9 +159,14 @@ async def _error(request: Request, error: Exception) -> Response:
     return JSONResponse({"error": error.detail}, status_code=error.status_code)
 
 
-def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
-    """The service over `series` (name to directory); `voice` serves the voice pages and
-    stems, for loopback only."""
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+def create_app(
+    series: Mapping[str, Path], voice: bool = True, hosts: Sequence[str] = LOOPBACK
+) -> Starlette:
+    """The service over `series` (name to directory), answering requests for `hosts`; `voice`
+    serves the voice pages and stems, for loopback only."""
 
     def path_of(request: Request) -> str:
         name = str(request.path_params["series"])
@@ -185,12 +208,13 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
         return await _call(
             lambda: api.song_analyze(
                 audio, track, lyrics, backing, span, backing_track, stream, within, title
-            )
+            ),
+            gpu=True,
         )
 
     async def plan_validate(request: Request) -> Response:
-        b = await _body(request)
-        return await _call(lambda: api.plan_validate(b.data))
+        path, b = path_of(request), await _body(request)
+        return await _call(lambda: api.plan_validate({**b.data, "series": path}))
 
     async def episodes(request: Request) -> Response:
         path = path_of(request)
@@ -214,7 +238,7 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
     async def proxies(request: Request) -> Response:
         path, b = path_of(request), await _body(request)
         only = b.texts("episodes")
-        return await _call(lambda: api.make_proxies(path, only))
+        return await _call(lambda: api.make_proxies(path, only), gpu=True)
 
     async def repeats(request: Request) -> Response:
         path = path_of(request)
@@ -265,7 +289,8 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
                 beats,
                 voices,
                 fx,
-            )
+            ),
+            gpu=True,
         )
 
     async def mads(request: Request) -> Response:
@@ -280,24 +305,24 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
         return str(plan)
 
     async def mad_validate(request: Request) -> Response:
-        plan = plan_file(request)
+        plan, _ = plan_file(request), await _body(request)
         return await _call(lambda: api.plan_validate(plan))
 
     async def mad_refine(request: Request) -> Response:
-        plan = plan_file(request)
-        return await _call(lambda: api.plan_refine(plan))
+        plan, _ = plan_file(request), await _body(request)
+        return await _call(lambda: api.plan_refine(plan), gpu=True)
 
     async def mad_render(request: Request) -> Response:
         plan, b = plan_file(request), await _body(request)
         quality, otio, subs = b.text("quality") or "preview", b.flag("otio", False), b.text("subs")
-        return await _call(lambda: api.render_plan(plan, quality, otio, subs or "all"))
+        return await _call(lambda: api.render_plan(plan, quality, otio, subs or "all"), gpu=True)
 
     async def speakers(request: Request) -> Response:
         path = path_of(request)
         return await _call(lambda: api.voice_speakers(path))
 
     async def voice_page(request: Request) -> Response:
-        path = path_of(request)
+        path, _ = path_of(request), await _body(request)
         return await _call(lambda: api.voice_page(path))
 
     async def episode_file(request: Request, kind: str) -> Response:
@@ -342,7 +367,7 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
         Route("/api/schema/plan", plan_schema),
         Route("/api/songs/analyze", song_analyze, methods=["POST"]),
         Route("/api/songs/{song}", song_show),
-        Route("/api/plan/validate", plan_validate, methods=["POST"]),
+        Route("/api/{series}/plan/validate", plan_validate, methods=["POST"]),
         Route("/api/{series}/episodes", episodes),
         Route("/api/{series}/episodes/{episode:int}", episode),
         Route("/api/{series}/proxies", proxies, methods=["POST"]),
@@ -367,13 +392,16 @@ def create_app(series: Mapping[str, Path], voice: bool = True) -> Starlette:
             Route("/voice/{series}/{path:path}", files(lambda d: d / "voice")),
             Route("/voice/{series}", files(lambda d: d / "voice")),
         ]
-    return Starlette(routes=routes, exception_handlers={HTTPException: _error})
-
-
-LOOPBACK = ("127.0.0.1", "localhost", "::1")
+    return Starlette(
+        routes=routes,
+        middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=list(hosts))],
+        exception_handlers={HTTPException: _error},
+    )
 
 
 def serve(series: Mapping[str, Path], host: str, port: int) -> None:
     """Serve until interrupted; the voice routes only on loopback."""
-    app = create_app(series, voice=host in LOOPBACK)
+    loopback = host in LOOPBACK
+    hosts = LOOPBACK if loopback else ("*",) if host in ("0.0.0.0", "::") else (host,)
+    app = create_app(series, voice=loopback, hosts=hosts)
     uvicorn.run(app, host=host, port=port, log_level="warning")

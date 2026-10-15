@@ -30,6 +30,7 @@ from tokimeki.mad.plan import (
     Plan,
     PlanFormatError,
     VoicePlan,
+    good_name,
     mad_dir,
     write_plan,
 )
@@ -301,6 +302,8 @@ def plan_auto(
     With `fx`, chorus entries and hard chorus downbeats flash, still shots drift and the
     strongest accents inside a slot punch in.
     """
+    if not good_name(name):
+        raise ApiError(f"{name!r} cannot name a MAD: one name, no slashes, not hidden")
     ctx = _series(series)
     analysis = _analysis(song)
     if analysis is None:
@@ -492,13 +495,14 @@ def series_episode(series: str, episode: int) -> Json:
 
 def episode_media(series: str, episode: int) -> Json:
     """Where an episode's browser media are: the proxy (black and silent outside kept shots;
-    None until `tokimeki proxy` made it) and the voice stem (silent outside kept shots)."""
+    None until `tokimeki proxy` made it for the shots kept now) and the voice stem (silent
+    outside kept shots)."""
     ctx = _series(series)
     e = _episode(ctx, episode)
-    video = proxy.proxy_path(ctx.paths, e.id)
+    video = proxy.fresh_proxy(ctx, e)
     voice = stems.stem_path(ctx.paths, e.id)
     return {
-        "video": str(video) if video.exists() else None,
+        "video": str(video) if video is not None else None,
         "voice": str(voice) if voice.exists() else None,
     }
 

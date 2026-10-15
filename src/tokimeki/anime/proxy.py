@@ -65,16 +65,32 @@ def _kept(ctx: Context, episode: Episode) -> list[tuple[int, int]]:
     return joined
 
 
+def _stamp(kept: Sequence[tuple[int, int]]) -> str:
+    return hashlib.sha1(json.dumps(list(kept)).encode()).hexdigest()[:16]
+
+
+def fresh_proxy(ctx: Context, episode: Episode) -> Path | None:
+    """The episode's proxy if it shows exactly the shots kept now; a stale one could show a
+    shot the filter has since dropped."""
+    out = proxy_path(ctx.paths, episode.id)
+    marker = _stamp_path(ctx.paths, episode.id)
+    if not stage_done(ctx.conn, episode.id, "filter") or not out.exists() or not marker.exists():
+        return None
+    return out if marker.read_text() == _stamp(_kept(ctx, episode)) else None
+
+
 def make_proxy(ctx: Context, episode: Episode) -> Path:
     """The episode's proxy, made unless the one in the cache shows the same kept shots."""
     if not stage_done(ctx.conn, episode.id, "filter"):
         raise ProxyError(f"{episode.path}: run `tokimeki ingest` first; the filter has not run")
+    found = fresh_proxy(ctx, episode)
+    if found is not None:
+        return found
     kept = _kept(ctx, episode)
-    stamp = hashlib.sha1(json.dumps(kept).encode()).hexdigest()[:16]
+    stamp = _stamp(kept)
     out = proxy_path(ctx.paths, episode.id)
     marker = _stamp_path(ctx.paths, episode.id)
-    if out.exists() and marker.exists() and marker.read_text() == stamp:
-        return out
+    marker.unlink(missing_ok=True)
     source = ctx.paths.episode_file(episode.path)
     width = round(HEIGHT * episode.width / episode.height / 2) * 2
     frames = [(float(a), float(b)) for a, b in kept]

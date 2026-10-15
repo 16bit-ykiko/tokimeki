@@ -39,7 +39,7 @@ def _json(response: Response) -> Json:
 
 def test_api_lists_episodes_and_shots_without_more_of_dropped_ones(series: Path) -> None:
     assert find_series(series.parent) == {"show": series}
-    client = TestClient(create_app({"show": series}))
+    client = TestClient(create_app({"show": series}), base_url="http://localhost")
     (episode,) = cast(list[Json], _json(client.get("/api/show/episodes"))["episodes"])
     assert episode["path"] == "ep01.mkv" and "filter" in cast(list[str], episode["stages"])
     assert episode["media"] == {
@@ -55,23 +55,31 @@ def test_api_lists_episodes_and_shots_without_more_of_dropped_ones(series: Path)
 
 
 def test_plans_are_checked_through_the_api(series: Path) -> None:
-    client = TestClient(create_app({"show": series}))
-    report = _json(client.post("/api/show/mads/draft/validate"))
+    client = TestClient(create_app({"show": series}), base_url="http://127.0.0.1")
+    report = _json(client.post("/api/show/mads/draft/validate", json={}))
     codes = {cast(str, i["code"]) for i in cast(list[Json], report["issues"])}
     assert not report["ok"] and "song.unknown" in codes
     plan = json.loads((mad_dir(series, "draft") / "plan.json").read_text())
     assert plan["series"] == "show"
-    assert _json(client.post("/api/plan/validate", json=plan))["ok"] is False
+    plan["series"] = "/elsewhere"
+    issues = _json(client.post("/api/show/plan/validate", json=plan))["issues"]
+    assert "song.unknown" in {i["code"] for i in cast(list[Json], issues)}
     bad = client.post("/api/show/plan/context", json={"character": 3})
     assert bad.status_code == 400 and "character" in str(_json(bad)["error"])
-    assert client.post("/api/show/mads/../validate").status_code == 404
+    assert client.post("/api/show/mads/../validate", json={}).status_code == 404
+    assert client.post("/api/show/mads/draft/render").status_code == 415
+    sneaky = client.post(
+        "/api/show/plan/auto", json={"character": "c", "song": "s", "name": "../x"}
+    )
+    assert sneaky.status_code == 400 and "name" in str(_json(sneaky)["error"])
+    assert TestClient(create_app({"show": series})).get("/api/series").status_code == 400
     assert [m["name"] for m in cast(list[Json], _json(client.get("/api/show/mads"))["mads"])] == [
         "draft"
     ]
 
 
 def test_files_answer_range_requests(series: Path) -> None:
-    client = TestClient(create_app({"show": series}))
+    client = TestClient(create_app({"show": series}), base_url="http://localhost")
     full = client.get("/mads/show/draft/preview.mp4")
     assert full.status_code == 200 and full.headers["accept-ranges"] == "bytes"
     part = client.get("/mads/show/draft/preview.mp4", headers={"Range": "bytes=10-19"})
@@ -88,7 +96,7 @@ def test_files_answer_range_requests(series: Path) -> None:
 
 
 def test_voice_stays_on_loopback(series: Path) -> None:
-    client = TestClient(create_app({"show": series}, voice=False))
+    client = TestClient(create_app({"show": series}, voice=False), base_url="http://localhost")
     assert client.get("/media/show/1/voice.flac").status_code == 404
     assert client.get("/api/show/speakers").status_code == 404
     episode = cast(list[Json], _json(client.get("/api/show/episodes"))["episodes"])[0]

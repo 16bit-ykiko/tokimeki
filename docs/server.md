@@ -8,7 +8,7 @@ pixi run tokimeki serve ~/anime/<series> --port 8780
 pixi run tokimeki proxy ~/anime/<series> --episode 01   # a browser-playable copy to scrub (GPU)
 ```
 
-It listens on 127.0.0.1. Given another `--host`, it leaves out the voice pages and the voice stems: voice data never leaves the machine. A series is addressed by its directory name, an episode by its id in the library.
+It listens on 127.0.0.1 and answers only requests addressed to it by that name (`localhost`, `127.0.0.1`), so a web page cannot reach it through DNS rebinding; every POST must be `application/json`, which a cross-site form cannot send. Given another `--host`, it leaves out the voice pages and the voice stems: voice data never leaves the machine. A series is addressed by its directory name, an episode by its id in the library.
 
 | Route | What |
 |---|---|
@@ -20,7 +20,7 @@ It listens on 127.0.0.1. Given another `--host`, it leaves out the voice pages a
 | `POST /api/{series}/plan/context` · `/plan/auto` | `plan context` and `plan auto`, the CLI's options as JSON fields (`range`, `max_slots`, `beats`, …) |
 | `GET /api/{series}/mads` | the MADs and their files |
 | `POST /api/{series}/mads/{name}/validate` · `/refine` · `/render` | on its `plan.json`; render takes `quality`, `otio`, `subs` |
-| `POST /api/plan/validate` | a plan given as the body |
+| `POST /api/{series}/plan/validate` | a plan given as the body, checked against that series |
 | `GET /api/schema/plan` | the plan's JSON Schema |
 | `GET /api/songs/{id}` · `POST /api/songs/analyze` | `song show`, `song analyze` |
 | `GET /api/{series}/speakers` · `POST /api/{series}/voice/page` | `voice speakers`, `voice page` (loopback only) |
@@ -30,6 +30,6 @@ It listens on 127.0.0.1. Given another `--host`, it leaves out the voice pages a
 | `GET /voice/{series}/…` | the voice pages, e.g. `/voice/{series}/page/` (loopback only) |
 | `GET /report/{series}/` | the series report |
 
-An API error answers 400 with `{"error", "details"}`, as the CLI prints it. Long calls (render, song analysis, proxies) hold their request until done.
+An API error answers 400 with `{"error", "details"}`, as the CLI prints it. Long calls (render, song analysis, proxies) hold their request until done, and the calls that may use the GPU (those, `plan auto` and `refine`, which may run the voice or motion stage) run one at a time.
 
-**Proxies.** The episodes as released (HEVC Main10 in MKV with FLAC) do not play in a browser, and they hold the shots the content filter dropped. `tokimeki proxy` writes `cache/proxy/<episode id>.mp4`: H.264 at 540p (NVDEC and `scale_cuda` in, NVENC out) with a keyframe every half second, AAC stereo of the main track, `+faststart`, and black and silent outside kept shots. It is made again when the kept shots change. The server never serves an episode file itself.
+**Proxies.** The episodes as released (HEVC Main10 in MKV with FLAC) do not play in a browser, and they hold the shots the content filter dropped. `tokimeki proxy` writes `cache/proxy/<episode id>.mp4`: H.264 at 540p (NVDEC and `scale_cuda` in, NVENC out) with a keyframe every half second, AAC stereo of the main track, `+faststart`, and black and silent outside kept shots. It is made again when the kept shots change, and until then the server answers 404 rather than serve a copy that could show a shot the filter has since dropped. The server never serves an episode file itself. On S1E01 it takes 97 s and 184 MB.

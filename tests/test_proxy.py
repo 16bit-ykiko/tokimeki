@@ -49,7 +49,7 @@ def test_proxy_is_black_and_silent_outside_kept_shots(
          "-f", "rawvideo", "-"],
         capture_output=True, check=True,
     ).stdout  # fmt: skip
-    luma = np.frombuffer(video, np.uint8).reshape(-1, 81).mean(axis=1)
+    luma = np.frombuffer(video, np.uint8).reshape(-1, 144).mean(axis=1)
     assert luma[:24].max() < 20 and luma[26:].min() > 20
     audio = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", str(made), "-ac", "1", "-ar", "8000", "-f", "f32le", "-"],
