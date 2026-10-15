@@ -1,11 +1,15 @@
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from tokimeki.library.episodes import list_episodes, stage_done
+from tokimeki.library.episodes import find_episode, list_episodes, register_episode, stage_done
 from tokimeki.library.records import Episode, ShotStatus
 from tokimeki.library.shots import status_counts
+from tokimeki.media.probe import probe
 from tokimeki.stages import cast, content_filter, lines, motion, scenes, shots, voice
 from tokimeki.stages.base import Context
+
+log = logging.getLogger("tokimeki")
 
 
 @dataclass(frozen=True)
@@ -62,3 +66,23 @@ def run(ctx: Context, episodes: Sequence[Episode], until: str = STAGE_NAMES[-1])
     """Run every stage up to `until`, skipping the work each stage has already finished."""
     for stage in STAGES[: _position(until) + 1]:
         stage.run(ctx, episodes)
+
+
+def register_episodes(ctx: Context) -> list[Episode]:
+    """Every video file of the series, registered in the library (probed on first sight)."""
+    episodes: list[Episode] = []
+    for relative in ctx.paths.find_episodes():
+        found = find_episode(ctx.conn, relative)
+        if found is None:
+            info = probe(ctx.paths.episode_file(relative))
+            found = register_episode(
+                ctx.conn,
+                relative,
+                info.width,
+                info.height,
+                info.fps,
+                info.estimated_frames,
+            )
+            log.info("registered %s (%dx%d, %.3f fps)", relative, info.width, info.height, info.fps)
+        episodes.append(found)
+    return episodes

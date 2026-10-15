@@ -11,8 +11,9 @@ from tokimeki.library.records import Rating, ShotStatus, TagCategory
 from tokimeki.library.shots import frame_tags, list_frames, list_shots
 from tokimeki.models.wd14 import Labels, Wd14Tagger, decode, preprocess
 from tokimeki.stages import content_filter, pipeline
-from tokimeki.stages.base import Context, open_series, register_episodes
+from tokimeki.stages.base import Context, open_series
 from tokimeki.stages.content_filter import UNSAFE_THRESHOLD, is_unsafe
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_unsafe_threshold_is_conservative() -> None:

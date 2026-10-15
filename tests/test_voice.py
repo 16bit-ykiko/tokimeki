@@ -11,7 +11,8 @@ from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio
 from tokimeki.models.separation import CHUNK, N_FFT, SAMPLE_RATE, separate_chunks
 from tokimeki.stages import pipeline, voice
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_chunked_separation_puts_the_audio_back_together() -> None:

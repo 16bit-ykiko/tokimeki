@@ -15,7 +15,8 @@ from tokimeki.library.records import PartKind, Rating, Tag, TagCategory
 from tokimeki.library.scenes import list_scenes, replace_scenes
 from tokimeki.library.tags import frame_tag_scores, tag_stats
 from tokimeki.stages import pipeline, scenes
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.scenes import ShotFacts, colour_histogram, continues, group
 
 RED = colour_histogram(np.full((4, 4, 3), (250, 10, 10), dtype=np.uint8))

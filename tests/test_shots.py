@@ -12,7 +12,8 @@ from tokimeki.media.decode import decode_for_transnet
 from tokimeki.media.sampling import sample_frames
 from tokimeki.models.transnet import TransNet, shots_from_predictions
 from tokimeki.stages import pipeline, shots
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_shots_from_predictions() -> None:

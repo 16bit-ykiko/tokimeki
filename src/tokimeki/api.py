@@ -45,7 +45,8 @@ from tokimeki.song.analysis import (
 )
 from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages import motion, voice
-from tokimeki.stages.base import Context, open_series, register_episodes
+from tokimeki.stages.base import Context, open_series
+from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.voice import voice_bounds
 from tokimeki.voice.page import write_page
 from tokimeki.voice.paths import page_dir

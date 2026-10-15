@@ -21,7 +21,8 @@ from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.song.analysis import SongSource, save_analysis
 from tokimeki.song.lyrics import LyricLine, pair
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 
 def _plan(bounds: list[float]) -> Plan:

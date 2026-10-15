@@ -8,7 +8,8 @@ from tokimeki.library.shots import list_shots
 from tokimeki.report import build_report
 from tokimeki.report.render import clock, framing
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_formatting() -> None:

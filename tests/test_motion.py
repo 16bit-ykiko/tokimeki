@@ -12,7 +12,8 @@ from tokimeki.mad.refine import refine, sync
 from tokimeki.media.decode import decode_luma
 from tokimeki.models.motion import MotionMeter
 from tokimeki.stages import motion, pipeline
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_stage_measures_kept_frames_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

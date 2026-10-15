@@ -13,7 +13,8 @@ from tokimeki.library.lines import get_line
 from tokimeki.library.records import Episode
 from tokimeki.report import build_report
 from tokimeki.stages import cast, pipeline, scenes
-from tokimeki.stages.base import Context, open_series, register_episodes
+from tokimeki.stages.base import Context, open_series
+from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.selfcheck import run_checks
 from tokimeki.voice import speakers
 from tokimeki.voice.page import serve

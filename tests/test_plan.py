@@ -21,7 +21,8 @@ from tokimeki.song.lyrics import LyricLine
 from tokimeki.song.slots import Slot
 from tokimeki.song.structure import Section
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
+from tokimeki.stages.pipeline import register_episodes
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)
 

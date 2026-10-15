@@ -17,9 +17,10 @@ from tokimeki.library.records import Box, Rating
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.stages import cast, pipeline
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import open_series
 from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, head_box, split_cluster
 from tokimeki.stages.clustering import average_linkage, evenly_spaced
+from tokimeki.stages.pipeline import register_episodes
 
 
 def test_ccip_difference_is_half_one_minus_cosine() -> None:
