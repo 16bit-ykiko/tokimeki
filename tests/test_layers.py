@@ -1,4 +1,5 @@
-"""The package's dependencies point one way: cli -> stages/report -> models, media, library."""
+"""The package's dependencies point one way: cli -> api -> mad, voice -> stages -> models,
+media, library."""
 
 import ast
 from pathlib import Path
@@ -8,13 +9,14 @@ import pytest
 PACKAGE = Path(__file__).parents[1] / "src" / "tokimeki"
 
 FORBIDDEN = {
-    "models": {"library", "stages", "report", "cli", "media", "song", "mad", "api"},
-    "media": {"library", "stages", "report", "cli", "models", "song", "mad", "api"},
-    "library": {"stages", "report", "cli", "models", "media", "song", "mad", "api"},
-    "report": {"stages", "cli", "models", "song", "mad", "api"},
-    "stages": {"report", "cli", "song", "mad", "api"},
-    "song": {"library", "stages", "report", "cli", "mad", "api"},
-    "mad": {"report", "cli", "api"},
+    "models": {"library", "stages", "report", "cli", "media", "song", "mad", "api", "voice"},
+    "media": {"library", "stages", "report", "cli", "models", "song", "mad", "api", "voice"},
+    "library": {"stages", "report", "cli", "models", "media", "song", "mad", "api", "voice"},
+    "report": {"stages", "cli", "models", "song", "mad", "api", "voice"},
+    "stages": {"report", "cli", "song", "mad", "api", "voice"},
+    "song": {"library", "stages", "report", "cli", "mad", "api", "voice"},
+    "mad": {"report", "cli", "api", "voice"},
+    "voice": {"report", "cli", "song", "mad", "api"},
 }
 
 

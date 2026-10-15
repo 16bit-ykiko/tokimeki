@@ -47,6 +47,9 @@ from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages import motion, voice
 from tokimeki.stages.base import Context, open_series, register_episodes
 from tokimeki.stages.voice import voice_bounds
+from tokimeki.voice.page import write_page
+from tokimeki.voice.paths import page_dir
+from tokimeki.voice.review import review, write_clips
 
 type Json = dict[str, object]
 
@@ -417,3 +420,17 @@ def render_plan(plan: str, quality: str = "preview", otio: bool = False, subs: s
         "refined": notes,
         "plan": str(out_dir / "plan.json"),
     }
+
+
+def voice_speakers(series: str) -> Json:
+    """Every speaker with its line count, minutes, close-up seeds, the cast it seems to be,
+    and its most and least typical lines (subtitle, transcript when there is one, clip)."""
+    return cast(Json, asdict(review(_series(series))))
+
+
+def voice_page(series: str) -> Json:
+    """Write the static listening page for naming speakers, cutting the clips it plays."""
+    ctx = _series(series)
+    data = review(ctx)
+    cut = write_clips(ctx, data)
+    return {"page": str(write_page(page_dir(ctx.paths), series, data)), "clips_cut": cut}

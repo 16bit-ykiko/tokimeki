@@ -8,10 +8,23 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki import api
+from tokimeki.library.episodes import list_episodes
+from tokimeki.library.lines import get_line
+from tokimeki.library.records import Episode
 from tokimeki.report import build_report
 from tokimeki.stages import cast, pipeline, scenes
-from tokimeki.stages.base import open_series, register_episodes
+from tokimeki.stages.base import Context, open_series, register_episodes
 from tokimeki.stages.selfcheck import run_checks
+from tokimeki.voice import speakers
+from tokimeki.voice.page import serve
+from tokimeki.voice.paths import voice_dir
+from tokimeki.voice.store import (
+    clean_voices,
+    find_speaker,
+    get_speaker,
+    list_speaker_fixes,
+    list_speakers,
+)
 
 type Handler = Callable[[argparse.Namespace], int]
 
@@ -282,6 +295,118 @@ def cmd_cast_doubtful(args: argparse.Namespace) -> int:
     return 0
 
 
+def _registered(ctx: Context, only: list[str] | None) -> list[Episode]:
+    episodes = list_episodes(ctx.conn)
+    return [e for e in episodes if not only or any(part in e.path for part in only)]
+
+
+def _print_speakers(ctx: Context) -> None:
+    found = speakers.evidence(ctx)
+    for s in list_speakers(ctx.conn):
+        proof = found.get(s.id, speakers.Evidence())
+        hint = f"  looks like {proof.suggestion}" if proof.suggestion and not s.name else ""
+        seeds = ", ".join(f"{n} {k}" for n, k in proof.seeds.items()) or "-"
+        seen = ", ".join(f"{m.name} {m.share:.0%} x{m.lift:.1f}" for m in proof.matches[:2])
+        name = s.name or "(unnamed)"
+        print(
+            f"{s.id:4}  {name:10} {s.lines:4} lines {s.seconds / 60:5.1f} min{hint}"
+            f"  seeds [{seeds}]  on screen [{seen}]"
+        )
+
+
+def _voice_errors(run: Callable[[], str | list[str]]) -> int:
+    try:
+        result = run()
+    except (KeyError, ValueError) as error:
+        print(f"error: {error.args[0]}", file=sys.stderr)
+        return 1
+    print(result if isinstance(result, str) else "\n".join(result))
+    return 0
+
+
+def cmd_voice_speakers(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    created = speakers.run(ctx, _registered(ctx, args.episode))
+    print(f"{created} new speakers")
+    _print_speakers(ctx)
+    return 0
+
+
+def cmd_voice_list(args: argparse.Namespace) -> int:
+    _print_speakers(open_series(_series(args)))
+    return 0
+
+
+def cmd_voice_accept(args: argparse.Namespace) -> int:
+    refs: list[str] = args.speaker or []
+    ctx = open_series(_series(args))
+    return _voice_errors(lambda: speakers.accept(ctx, refs) or "nothing to accept")
+
+
+def cmd_voice_name(args: argparse.Namespace) -> int:
+    ref: str = args.speaker
+    name: str = args.name
+    ctx = open_series(_series(args))
+    return _voice_errors(lambda: speakers.rename(ctx, ref, name.strip() or None).label)
+
+
+def cmd_voice_merge(args: argparse.Namespace) -> int:
+    sources: list[str] = args.source
+    target: str = args.target
+    ctx = open_series(_series(args))
+    return _voice_errors(lambda: speakers.merge(ctx, sources, target).label)
+
+
+def cmd_voice_move(args: argparse.Namespace) -> int:
+    lines: list[int] = args.line
+    target: str | None = args.to
+    ctx = open_series(_series(args))
+    return _voice_errors(lambda: speakers.move(ctx, lines, target))
+
+
+def cmd_voice_fixes(args: argparse.Namespace) -> int:
+    ctx = open_series(_series(args))
+    for fix in list_speaker_fixes(ctx.conn):
+        to = get_speaker(ctx.conn, fix.speaker_id).label if fix.speaker_id else "nobody"
+        print(f"line {fix.line_id}: {to}")
+    return 0
+
+
+def cmd_voice_recluster(args: argparse.Namespace) -> int:
+    threshold: float = args.threshold
+    ctx = open_series(_series(args))
+    print(f"{speakers.recluster(ctx, threshold)} speakers besides the named ones")
+    _print_speakers(ctx)
+    return 0
+
+
+def cmd_voice_lines(args: argparse.Namespace) -> int:
+    ref: str = args.speaker
+    ctx = open_series(_series(args))
+    try:
+        speaker = find_speaker(ctx.conn, ref)
+    except KeyError as error:
+        print(f"error: {error.args[0]}", file=sys.stderr)
+        return 1
+    for v in clean_voices(ctx.conn, speaker.id):
+        text = " ".join(get_line(ctx.conn, v.line_id).text.split())
+        print(f"{v.line_id:6}  ep {v.episode_id} {v.start:7.1f}s {v.duration:4.1f}s  {text}")
+    return 0
+
+
+def cmd_voice_page(args: argparse.Namespace) -> int:
+    series: str = args.series
+    return _emit(lambda: api.voice_page(series))
+
+
+def cmd_voice_serve(args: argparse.Namespace) -> int:
+    port: int = args.port
+    root = voice_dir(open_series(_series(args)).paths)
+    print(f"serving {root} on http://127.0.0.1:{port}/ (the speakers page is page/)")
+    serve(root, port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tokimeki", description=__doc__)
     sub = parser.add_subparsers(required=True, metavar="command")
@@ -438,6 +563,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doubt.add_argument("cluster", help="name or id")
     doubt.add_argument("--limit", type=int, default=15)
+    voice_parser = sub.add_parser(
+        "voice", help="who says each line: speakers clustered from their voices and named"
+    )
+    voice_sub = voice_parser.add_subparsers(required=True, metavar="action")
+
+    def voice_command(name: str, handler: Handler, help_: str) -> argparse.ArgumentParser:
+        p = voice_sub.add_parser(name, help=help_, description=help_)
+        p.set_defaults(handler=handler)
+        p.add_argument("series", help="the series directory holding the episodes")
+        return p
+
+    found = voice_command(
+        "speakers", cmd_voice_speakers, "cut, embed and cluster every line's voice (GPU)"
+    )
+    found.add_argument("--episode", action="append", help="only episodes containing this")
+    voice_command("list", cmd_voice_list, "speakers with lines, minutes, seeds and suggestions")
+    accept = voice_command(
+        "accept", cmd_voice_accept, "name speakers by their suggestion (one character: merged)"
+    )
+    accept.add_argument("speaker", nargs="*", help="ids or names (default: every unnamed one)")
+    vname = voice_command("name", cmd_voice_name, "name a speaker (an empty name clears it)")
+    vname.add_argument("speaker", help="id or name")
+    vname.add_argument("name")
+    vmerge = voice_command("merge", cmd_voice_merge, "move the lines of speakers into another")
+    vmerge.add_argument("source", nargs="+", help="ids or names")
+    vmerge.add_argument("target", help="id or name")
+    vmove = voice_command(
+        "move", cmd_voice_move, "say who says a line (kept through recluster and a redo)"
+    )
+    vmove.add_argument("--line", type=int, action="append", required=True, help="repeatable")
+    vto = vmove.add_mutually_exclusive_group(required=True)
+    vto.add_argument("--to", help="the named speaker who says it")
+    vto.add_argument(
+        "--nobody", dest="to", action="store_const", const=None, help="keep it out of every bank"
+    )
+    voice_command("fixes", cmd_voice_fixes, "list the lines moved with `voice move`")
+    again = voice_command(
+        "recluster", cmd_voice_recluster, "cluster unnamed speakers' lines again (no GPU)"
+    )
+    again.add_argument("--threshold", type=float, default=speakers.CLUSTER_THRESHOLD)
+    vlines = voice_command("lines", cmd_voice_lines, "a speaker's lines with their subtitles")
+    vlines.add_argument("speaker", help="id or name")
+    voice_command("page", cmd_voice_page, "write the listening page for naming speakers")
+    vserve = voice_command("serve", cmd_voice_serve, "serve the voice pages on localhost only")
+    vserve.add_argument("--port", type=int, default=8770)
     return parser
 
 
