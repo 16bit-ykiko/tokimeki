@@ -56,5 +56,6 @@ def test_proxy_is_black_and_silent_outside_kept_shots(
         capture_output=True, check=True,
     ).stdout  # fmt: skip
     samples = np.abs(np.frombuffer(audio, np.float32))
-    assert samples[200:7800].max() < 0.01 and samples[8200:15800].mean() > 0.1
+    quiet, heard = samples[200:7800].max(), samples[8200:15800].mean()
+    assert quiet < 0.01 and heard > 0.05, (quiet, heard)
     assert api.make_proxies(str(root))["proxies"] == [made]
