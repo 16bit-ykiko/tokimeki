@@ -8,8 +8,8 @@ SRT for editors that take nothing else.
 from collections.abc import Sequence
 from pathlib import Path
 
-from tokimeki.mad.fonts import Fonts
 from tokimeki.mad.song.lyrics import LyricPair
+from tokimeki.render.fonts import Fonts
 
 WIDTH, HEIGHT = 1920, 1080
 FILL = "&H00FFFFFF"

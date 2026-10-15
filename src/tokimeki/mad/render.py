@@ -13,12 +13,12 @@ from pathlib import Path
 import numpy as np
 
 from tokimeki.library.paths import SeriesPaths
-from tokimeki.mad.mix import DUCK_DB, RATE, VoiceClip, mix
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
 from tokimeki.mad.song.analysis import SongAnalysis
-from tokimeki.mad.video import RenderSettings, burn_subtitles, ffmpeg
 from tokimeki.media.audio import decode_audio, encode_audio
 from tokimeki.models.timeline import TimelineClip, write_timeline
+from tokimeki.render.mix import DUCK_DB, RATE, VoiceClip, mix
+from tokimeki.render.video import RenderSettings, burn_subtitles, ffmpeg
 
 RENDER_VERSION = 1
 

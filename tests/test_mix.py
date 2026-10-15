@@ -7,7 +7,11 @@ from test_plan import song
 
 from tokimeki.anime.stems import voiced
 from tokimeki.library.records import Episode, Line, LineKind
-from tokimeki.mad.mix import (
+from tokimeki.mad.plan import Plan, SlotPlan
+from tokimeki.mad.song.gaps import gaps, quiet_bars, sung_overlap, sung_spans
+from tokimeki.mad.song.lyrics import LyricLine
+from tokimeki.mad.voices import VoiceLine, pick_voice
+from tokimeki.render.mix import (
     DUCK_ATTACK,
     DUCK_RELEASE,
     RATE,
@@ -18,10 +22,6 @@ from tokimeki.mad.mix import (
     level_db,
     mix,
 )
-from tokimeki.mad.plan import Plan, SlotPlan
-from tokimeki.mad.song.gaps import gaps, quiet_bars, sung_overlap, sung_spans
-from tokimeki.mad.song.lyrics import LyricLine
-from tokimeki.mad.voices import VoiceLine, pick_voice
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)
 

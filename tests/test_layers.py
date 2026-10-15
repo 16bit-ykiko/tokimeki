@@ -11,6 +11,7 @@ PACKAGE = Path(__file__).parents[1] / "src" / "tokimeki"
 FORBIDDEN = {
     "models": {
         "cast",
+        "render",
         "library",
         "anime",
         "cli",
@@ -21,6 +22,7 @@ FORBIDDEN = {
     },
     "media": {
         "cast",
+        "render",
         "library",
         "anime",
         "cli",
@@ -31,6 +33,7 @@ FORBIDDEN = {
     },
     "library": {
         "cast",
+        "render",
         "anime",
         "cli",
         "models",
@@ -39,7 +42,8 @@ FORBIDDEN = {
         "api",
         "voice",
     },
-    "cast": {"anime", "cli", "mad", "api", "voice"},
+    "cast": {"render", "anime", "cli", "mad", "api", "voice"},
+    "render": {"cast", "anime", "cli", "mad", "api", "voice"},
     "anime": {"cli", "mad", "api", "voice"},
     "mad": {"cli", "api", "voice"},
     "voice": {"cli", "mad", "api"},

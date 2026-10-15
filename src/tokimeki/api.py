@@ -22,7 +22,6 @@ from tokimeki.library.shots import get_shot
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
-from tokimeki.mad.fonts import FontError, prepare_fonts
 from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import (
     PLAN_JSON_SCHEMA,
@@ -46,9 +45,10 @@ from tokimeki.mad.song.analysis import (
 from tokimeki.mad.song.lyrics import LyricSource, pair
 from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.validate import Issue, validate
-from tokimeki.mad.video import FINAL, PREVIEW
 from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines
 from tokimeki.media.audio import AudioError
+from tokimeki.render.fonts import FontError, prepare_fonts
+from tokimeki.render.video import FINAL, PREVIEW
 from tokimeki.voice.page import write_page
 from tokimeki.voice.paths import page_dir
 from tokimeki.voice.review import review, write_clips

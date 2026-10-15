@@ -11,7 +11,6 @@ from tokimeki.anime.scenes import summaries
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context
 from tokimeki.mad.candidates import Candidate, find_candidates
-from tokimeki.mad.mix import DUCK_DB
 from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
@@ -20,6 +19,7 @@ from tokimeki.mad.song.gaps import gaps, quiet_bars
 from tokimeki.mad.song.lyrics import pair
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
 from tokimeki.mad.voices import usable_lines
+from tokimeki.render.mix import DUCK_DB
 
 type Json = dict[str, object]
 
