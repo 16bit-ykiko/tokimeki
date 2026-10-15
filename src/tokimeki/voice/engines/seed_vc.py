@@ -48,7 +48,7 @@ SNAPSHOTS = (
     ("nvidia/bigvgan_v2_44khz_128band_512x", ("config.json", "bigvgan_generator.pt")),
     ("openai/whisper-small", ("*.json", "*.txt", "model.safetensors")),
 )
-"""Models it loads from the default Hub cache."""
+"""Models it loads by name; its scripts point the Hub cache at `./checkpoints/hf_cache`."""
 OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
 """Everything is fetched by `install`; nothing is downloaded while it trains or converts."""
 _PREFETCH = """
@@ -59,7 +59,7 @@ for repo, name in (x.split("::") for x in files.split(",")):
     hf_hub_download(repo_id=repo, filename=name, cache_dir="./checkpoints")
 for spec in snapshots.split(","):
     repo, patterns = spec.split("::")
-    snapshot_download(repo, allow_patterns=patterns.split("|"))
+    snapshot_download(repo, allow_patterns=patterns.split("|"), cache_dir="./checkpoints/hf_cache")
 """
 
 
