@@ -39,6 +39,7 @@ pixi run test                 # GPU tests are skipped where there is no GPU
       fonts/                          # subtitle fonts copied from the system
       subs/                           # subtitle files unpacked from archives (inputs for lyrics)
       report/index.html               # the static review page and its images
+      voice/page/                     # the speakers' listening page and its clips (never shared)
   ```
 - Song analyses are shared by every series: `$TOKIMEKI_HOME/songs/<id>/analysis.json` (default `~/.local/share/tokimeki/songs`).
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.

@@ -2,7 +2,7 @@
 
 ## Code layout
 
-Dependencies point one way: `cli` → `api` → `mad` → `stages`, `song` → `models`, `media`, `library` (and `report` → `library`, `media`). A test fails if a lower layer imports a higher one.
+Dependencies point one way: `cli` → `api` → `mad`, `voice` → `stages`, `song` → `models`, `media`, `library` (and `report` → `library`, `media`). A test fails if a lower layer imports a higher one.
 
 ```
 src/tokimeki/
@@ -17,9 +17,11 @@ src/tokimeki/
   song/         song analysis: beats, bars, vocal line, sections, excerpt, slots, lyrics
   mad/          edit plans: context, schema, validation, refinement, draft arranger, render, report
   report/       the static HTML report of a series
+  voice/        speakers (clips, embeddings, clusters, naming) and their listening page; self-contained,
+                its own model wrapper and library queries included, so it moves as one piece
 ```
 
-Planned: `voice/` (speakers, transcripts, voice banks, voice models) and `comic/` (page scripts and voicing, behind the screenshot service), on the same layering.
+Planned: transcripts, voice banks and voice models in `voice/`, and `comic/` (page scripts and voicing, behind the screenshot service), on the same layering.
 
 ## Target layout
 
@@ -62,6 +64,7 @@ Weights come from the Hugging Face Hub on first use (into the HF cache); the cod
 | Beats | Beat This! `final0` (network vendored in `models/beat_this`, MIT) | PyTorch, CUDA |
 | Vocal line, episode voices | MDX-Net Kim_Vocal_2 (`seanghay/uvr_models`, from UVR) | onnxruntime, CUDA (STFT in PyTorch) |
 | Motion | none: luma differences of 160×90 frames | NVDEC + PyTorch, CUDA |
+| Speakers | litagin anime speaker embedding, `char` (ECAPA-TDNN, ONNX export `aloxaf/anime-speaker-embedding-char-onnx`) | onnxruntime, CUDA |
 
 The deepghs and WD14 ONNX files are wrapped directly instead of going through `dghs-imgutils`, the library they were published with:
 
