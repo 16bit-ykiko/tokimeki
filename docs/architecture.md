@@ -41,9 +41,12 @@ src/tokimeki/
   api.py     the agent-facing JSON API (an MCP server can wrap it)
   cli.py     the `tokimeki` command
 clients/     phone-side capture: the iOS Shortcut recipe, later an Android floating button
+web/         local web UI in TypeScript (React, Vite, strict), served by `server/`
 ```
 
 The flow: `anime` ingests a series → `voice` builds banks and trains models → `server` takes a screenshot from a client, `comic` scripts it with the cast and voices it. `mad` builds on `anime`, `cast` and `render`.
+
+Computation stays in Python; interaction moves to `web/`: browsing the scene library, naming and fixing the cast and speakers, listening to voice samples, reviewing MAD plans. The UI talks only to the JSON API that `server/` exposes over `api.py`, and its types are generated from the same JSON Schemas (the plan schema first), so both sides cannot drift. pixi installs Node.js and pnpm, and `pixi run check` adds `tsc --noEmit` and lint. It is built after the voice work and the layout move; until then pages stay static HTML.
 
 ## Models
 
