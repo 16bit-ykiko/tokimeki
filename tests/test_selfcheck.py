@@ -1,6 +1,6 @@
 import pytest
 
-from tokimeki.stages.selfcheck import run_checks
+from tokimeki.selfcheck import run_checks
 
 
 @pytest.mark.gpu

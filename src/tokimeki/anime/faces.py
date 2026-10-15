@@ -14,6 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.anime.frames import ensure_frames
 from tokimeki.cast.clusters import assign_clusters
 from tokimeki.library.cast import NewFace, add_faces, clear_episode_faces
 from tokimeki.library.db import transaction
@@ -25,7 +26,6 @@ from tokimeki.media.images import load_image, square_around
 from tokimeki.models.ccip import CcipEncoder
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.models.gpu import loaded, prefetched
-from tokimeki.stages.frames import ensure_frames
 
 NAME = "cast"
 

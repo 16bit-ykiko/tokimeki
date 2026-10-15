@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 from test_plan import song
 
+from tokimeki.anime.stems import voiced
 from tokimeki.library.records import Episode, Line, LineKind
 from tokimeki.mad.mix import (
     DUCK_ATTACK,
@@ -21,7 +22,6 @@ from tokimeki.mad.plan import Plan, SlotPlan
 from tokimeki.mad.voices import VoiceLine, pick_voice
 from tokimeki.song.gaps import gaps, quiet_bars, sung_overlap, sung_spans
 from tokimeki.song.lyrics import LyricLine
-from tokimeki.stages.voice import voiced
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)
 

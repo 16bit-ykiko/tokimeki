@@ -5,6 +5,7 @@ import shutil
 import time
 from collections.abc import Sequence
 
+from tokimeki.anime.frames import ensure_frames
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import (
     clear_stage,
@@ -20,7 +21,6 @@ from tokimeki.media.decode import decode_for_transnet
 from tokimeki.media.probe import probe, require_nvdec
 from tokimeki.models.gpu import loaded
 from tokimeki.models.transnet import THRESHOLD, TransNet, shots_from_predictions
-from tokimeki.stages.frames import ensure_frames
 
 NAME = "shots"
 log = logging.getLogger("tokimeki")

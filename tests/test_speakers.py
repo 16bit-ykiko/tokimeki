@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from tokimeki.anime.stems import stem_path
 from tokimeki.cli import main
 from tokimeki.library import cast as cast_db
 from tokimeki.library import episodes as episode_db
@@ -15,7 +16,6 @@ from tokimeki.library.lines import NewLine, list_lines, replace_lines
 from tokimeki.library.records import Box, Line, LineKind, Part, PartKind, Rating
 from tokimeki.library.series import Context, open_series
 from tokimeki.media.audio import encode_audio
-from tokimeki.stages.voice import stem_path
 from tokimeki.voice import speakers
 from tokimeki.voice.clips import CLIP_RATE, cut_lines
 from tokimeki.voice.embedding import DIMENSIONS, SpeakerEncoder

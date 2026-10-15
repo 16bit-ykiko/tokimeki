@@ -11,6 +11,9 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
 
+from tokimeki.anime import motion, stems
+from tokimeki.anime.pipeline import register_episodes
+from tokimeki.anime.stems import voice_bounds
 from tokimeki.library.episodes import find_episode, get_episode, stage_done
 from tokimeki.library.lines import list_lines
 from tokimeki.library.records import Episode, LineKind
@@ -46,9 +49,6 @@ from tokimeki.song.analysis import (
     with_accents,
 )
 from tokimeki.song.lyrics import LyricSource, pair
-from tokimeki.stages import motion, voice
-from tokimeki.stages.pipeline import register_episodes
-from tokimeki.stages.voice import voice_bounds
 from tokimeki.voice.page import write_page
 from tokimeki.voice.paths import page_dir
 from tokimeki.voice.review import review, write_clips
@@ -332,9 +332,9 @@ def plan_auto(
 
 def _ensure_stems(ctx: Context, episodes: Sequence[Episode]) -> None:
     """Separate the voice of episodes that have not been yet (the `voice` stage, GPU)."""
-    todo = [e for e in episodes if not stage_done(ctx.conn, e.id, voice.NAME)]
+    todo = [e for e in episodes if not stage_done(ctx.conn, e.id, stems.NAME)]
     if todo:
-        voice.run(ctx, todo)
+        stems.run(ctx, todo)
 
 
 def _draft_voice(
@@ -360,7 +360,7 @@ def _voice_stems(ctx: Context, plan: Plan) -> list[tuple[VoicePlan, Path]]:
             raise ApiError(f"voice at {v.at:.2f}s: no episode {v.episode!r}")
         found[v.episode] = episode
     _ensure_stems(ctx, list(found.values()))
-    return [(v, voice.stem_path(ctx.paths, found[v.episode].id)) for v in plan.voices]
+    return [(v, stems.stem_path(ctx.paths, found[v.episode].id)) for v in plan.voices]
 
 
 def render_plan(plan: str, quality: str = "preview", otio: bool = False, subs: str = "all") -> Json:

@@ -9,6 +9,9 @@ from clips import make_clip
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.anime import pipeline
+from tokimeki.anime.faces import head_box
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.cast import clusters
 from tokimeki.cast.clustering import average_linkage, evenly_spaced
 from tokimeki.cast.clusters import MIN_CLUSTER_FACES, assign_clusters, split_cluster
@@ -20,9 +23,6 @@ from tokimeki.library.records import Box, Rating
 from tokimeki.library.series import open_series
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
-from tokimeki.stages import pipeline
-from tokimeki.stages.faces import head_box
-from tokimeki.stages.pipeline import register_episodes
 
 
 def test_ccip_difference_is_half_one_minus_cosine() -> None:

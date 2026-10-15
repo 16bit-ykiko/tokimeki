@@ -5,10 +5,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from tokimeki.anime.report.data import gather
+from tokimeki.anime.report.images import write_face, write_thumbnail
+from tokimeki.anime.report.render import render
 from tokimeki.library.paths import SeriesPaths
-from tokimeki.report.data import gather
-from tokimeki.report.images import write_face, write_thumbnail
-from tokimeki.report.render import render
 
 
 def build_report(conn: sqlite3.Connection, paths: SeriesPaths) -> Path:

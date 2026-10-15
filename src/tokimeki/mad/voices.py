@@ -8,6 +8,7 @@ who is on screen while a line is said is listed for the arranger to judge.
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
+from tokimeki.anime.stems import voice_bounds
 from tokimeki.library.cast import named_cast_by_shot
 from tokimeki.library.episodes import get_episode
 from tokimeki.library.lines import get_line, list_lines, list_parts, shots_in_parts
@@ -17,7 +18,6 @@ from tokimeki.library.shots import kept_ranges, list_shots
 from tokimeki.mad.plan import Plan, VoicePlan
 from tokimeki.song.analysis import SongAnalysis
 from tokimeki.song.gaps import Gap, gaps
-from tokimeki.stages.voice import voice_bounds
 
 MAX_VOICE = 8.0
 GAP_MARGIN = 0.3

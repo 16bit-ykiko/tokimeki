@@ -6,14 +6,14 @@ import pytest
 from clips import make_clip
 from PIL import Image
 
+from tokimeki.anime import content_filter, pipeline
+from tokimeki.anime.content_filter import UNSAFE_THRESHOLD, is_unsafe
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.episodes import stage_done, stage_params
 from tokimeki.library.records import Rating, ShotStatus, TagCategory
 from tokimeki.library.series import Context, open_series
 from tokimeki.library.shots import frame_tags, list_frames, list_shots
 from tokimeki.models.wd14 import Labels, Wd14Tagger, decode, preprocess
-from tokimeki.stages import content_filter, pipeline
-from tokimeki.stages.content_filter import UNSAFE_THRESHOLD, is_unsafe
-from tokimeki.stages.pipeline import register_episodes
 
 
 def test_unsafe_threshold_is_conservative() -> None:

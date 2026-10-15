@@ -1,4 +1,4 @@
-"""The package's dependencies point one way: cli -> api -> mad, voice -> stages -> models,
+"""The package's dependencies point one way: cli -> api -> mad, voice -> anime -> cast -> models,
 media, library."""
 
 import ast
@@ -12,8 +12,7 @@ FORBIDDEN = {
     "models": {
         "cast",
         "library",
-        "stages",
-        "report",
+        "anime",
         "cli",
         "media",
         "song",
@@ -24,8 +23,7 @@ FORBIDDEN = {
     "media": {
         "cast",
         "library",
-        "stages",
-        "report",
+        "anime",
         "cli",
         "models",
         "song",
@@ -35,8 +33,7 @@ FORBIDDEN = {
     },
     "library": {
         "cast",
-        "stages",
-        "report",
+        "anime",
         "cli",
         "models",
         "media",
@@ -45,12 +42,11 @@ FORBIDDEN = {
         "api",
         "voice",
     },
-    "cast": {"stages", "report", "cli", "song", "mad", "api", "voice"},
-    "report": {"stages", "cli", "models", "song", "mad", "api", "voice"},
-    "stages": {"report", "cli", "song", "mad", "api", "voice"},
-    "song": {"library", "stages", "report", "cli", "mad", "api", "voice"},
-    "mad": {"report", "cli", "api", "voice"},
-    "voice": {"report", "cli", "song", "mad", "api"},
+    "cast": {"anime", "cli", "song", "mad", "api", "voice"},
+    "anime": {"cli", "song", "mad", "api", "voice"},
+    "song": {"library", "anime", "cli", "mad", "api", "voice"},
+    "mad": {"cli", "api", "voice"},
+    "voice": {"cli", "song", "mad", "api"},
 }
 
 

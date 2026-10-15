@@ -8,15 +8,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki import api
+from tokimeki.anime import pipeline, scenes
+from tokimeki.anime.pipeline import register_episodes
+from tokimeki.anime.report import build_report
 from tokimeki.cast import clusters
 from tokimeki.library.episodes import list_episodes
 from tokimeki.library.lines import get_line
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context, open_series
-from tokimeki.report import build_report
-from tokimeki.stages import pipeline, scenes
-from tokimeki.stages.pipeline import register_episodes
-from tokimeki.stages.selfcheck import run_checks
+from tokimeki.selfcheck import run_checks
 from tokimeki.voice import speakers
 from tokimeki.voice.page import serve
 from tokimeki.voice.paths import voice_dir

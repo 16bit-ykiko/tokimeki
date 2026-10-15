@@ -12,6 +12,7 @@ from collections.abc import Iterator, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.anime.frames import ensure_frames, planned_frames
 from tokimeki.library.cast import delete_empty_clusters
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
@@ -29,7 +30,6 @@ from tokimeki.library.shots import (
 from tokimeki.media.images import load_image
 from tokimeki.models.gpu import loaded, prefetched
 from tokimeki.models.wd14 import Prediction, Wd14Tagger
-from tokimeki.stages.frames import ensure_frames, planned_frames
 
 NAME = "filter"
 

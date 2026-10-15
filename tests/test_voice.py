@@ -6,13 +6,13 @@ import pytest
 import torch
 from clips import make_clip
 
+from tokimeki.anime import pipeline, stems
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.episodes import stage_done
 from tokimeki.library.series import open_series
 from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio
 from tokimeki.models.separation import CHUNK, N_FFT, SAMPLE_RATE, separate_chunks
-from tokimeki.stages import pipeline, voice
-from tokimeki.stages.pipeline import register_episodes
 
 
 def test_chunked_separation_puts_the_audio_back_together() -> None:
@@ -26,7 +26,7 @@ def test_chunked_separation_puts_the_audio_back_together() -> None:
 
 
 def test_kept_gain_ramps_inside_kept_ranges() -> None:
-    gain = voice.kept_gain([(0.0, 1.0), (2.0, 2.5)], 300, 100)
+    gain = stems.kept_gain([(0.0, 1.0), (2.0, 2.5)], 300, 100)
     assert gain[50] == 1.0 and gain[150] == 0.0 and gain[260] == 0.0
     assert gain[200] == 0.0 and 0.0 < gain[200 + 0] + gain[201] < 1.0 + 1e-6
     assert gain[249] < 1.0 and gain[240] == 1.0
@@ -41,13 +41,13 @@ def test_stage_writes_a_stem_silent_outside_kept_shots(
     episodes = register_episodes(ctx)
     pipeline.run(ctx, episodes)
     (episode,) = episodes
-    assert stage_done(ctx.conn, episode.id, voice.NAME)
-    stem = voice.stem_path(ctx.paths, episode.id)
+    assert stage_done(ctx.conn, episode.id, stems.NAME)
+    stem = stems.stem_path(ctx.paths, episode.id)
     audio = decode_audio(stem, SAMPLE_RATE, channels=2)
-    gain = voice.kept_gain(kept_ranges(ctx.conn, episode), audio.shape[1], SAMPLE_RATE)
+    gain = stems.kept_gain(kept_ranges(ctx.conn, episode), audio.shape[1], SAMPLE_RATE)
     assert 0 < (gain == 1).sum() < len(gain)
     assert np.abs(audio[:, gain == 1] - 0.1).max() < 1e-3
     assert np.abs(audio[:, gain == 0]).max() < 1e-4
 
-    pipeline.redo(ctx, episodes, voice.NAME)
+    pipeline.redo(ctx, episodes, stems.NAME)
     assert not stem.exists()

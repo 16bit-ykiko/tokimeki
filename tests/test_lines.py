@@ -9,6 +9,9 @@ import pytest
 from clips import make_clip
 from numpy.typing import NDArray
 
+from tokimeki.anime import pipeline
+from tokimeki.anime.lines import classify, speech_mask, timing_check
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library import episodes as episode_db
 from tokimeki.library import shots as shot_db
 from tokimeki.library.db import open_library
@@ -25,9 +28,6 @@ from tokimeki.library.series import open_series
 from tokimeki.media.audio import main_audio
 from tokimeki.media.subtitles import ass_time, parse_ass
 from tokimeki.models.vad import FRAME_SECONDS, frame_blocks
-from tokimeki.stages import pipeline
-from tokimeki.stages.lines import classify, speech_mask, timing_check
-from tokimeki.stages.pipeline import register_episodes
 
 ASS = """﻿[Script Info]
 Title: test

@@ -4,12 +4,12 @@ import fakes
 import pytest
 from clips import make_clip
 
+from tokimeki.anime import pipeline
+from tokimeki.anime.pipeline import register_episodes
+from tokimeki.anime.report import build_report
+from tokimeki.anime.report.render import clock, framing
 from tokimeki.library.series import open_series
 from tokimeki.library.shots import list_shots
-from tokimeki.report import build_report
-from tokimeki.report.render import clock, framing
-from tokimeki.stages import pipeline
-from tokimeki.stages.pipeline import register_episodes
 
 
 def test_formatting() -> None:

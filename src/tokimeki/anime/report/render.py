@@ -3,8 +3,8 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
+from tokimeki.anime.report.data import ClusterReport, EpisodeReport, KeptShot, ReportData
 from tokimeki.library.records import Episode, Shot
-from tokimeki.report.data import ClusterReport, EpisodeReport, KeptShot, ReportData
 
 CLOSE_UP_HEIGHT = 0.35
 WIDE_HEIGHT = 0.15

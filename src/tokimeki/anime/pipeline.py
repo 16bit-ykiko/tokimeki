@@ -2,12 +2,12 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from tokimeki.anime import content_filter, faces, lines, motion, scenes, shots, stems
 from tokimeki.library.episodes import find_episode, list_episodes, register_episode, stage_done
 from tokimeki.library.records import Episode, ShotStatus
 from tokimeki.library.series import Context
 from tokimeki.library.shots import status_counts
 from tokimeki.media.probe import probe
-from tokimeki.stages import content_filter, faces, lines, motion, scenes, shots, voice
 
 log = logging.getLogger("tokimeki")
 
@@ -25,7 +25,7 @@ STAGES = (
     Stage(faces.NAME, faces.run, faces.reset),
     Stage(lines.NAME, lines.run, lines.reset),
     Stage(scenes.NAME, scenes.run, scenes.reset),
-    Stage(voice.NAME, voice.run, voice.reset),
+    Stage(stems.NAME, stems.run, stems.reset),
     Stage(motion.NAME, motion.run, motion.reset),
 )
 STAGE_NAMES = tuple(stage.name for stage in STAGES)

@@ -6,14 +6,14 @@ import numpy as np
 import pytest
 from clips import make_clip
 
+from tokimeki.anime import pipeline, shots
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.episodes import get_episode, stage_done
 from tokimeki.library.series import open_series
 from tokimeki.library.shots import list_shots
 from tokimeki.media.decode import decode_for_transnet
 from tokimeki.media.sampling import sample_frames
 from tokimeki.models.transnet import TransNet, shots_from_predictions
-from tokimeki.stages import pipeline, shots
-from tokimeki.stages.pipeline import register_episodes
 
 
 def test_shots_from_predictions() -> None:

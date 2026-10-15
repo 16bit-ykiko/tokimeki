@@ -8,6 +8,9 @@ import pytest
 from clips import make_clip
 from test_lines import ASS
 
+from tokimeki.anime import pipeline, scenes
+from tokimeki.anime.pipeline import register_episodes
+from tokimeki.anime.scenes import ShotFacts, colour_histogram, continues, group
 from tokimeki.library import episodes as episode_db
 from tokimeki.library import shots as shot_db
 from tokimeki.library.db import open_library
@@ -15,9 +18,6 @@ from tokimeki.library.records import PartKind, Rating, Tag, TagCategory
 from tokimeki.library.scenes import list_scenes, replace_scenes
 from tokimeki.library.series import open_series
 from tokimeki.library.tags import frame_tag_scores, tag_stats
-from tokimeki.stages import pipeline, scenes
-from tokimeki.stages.pipeline import register_episodes
-from tokimeki.stages.scenes import ShotFacts, colour_histogram, continues, group
 
 RED = colour_histogram(np.full((4, 4, 3), (250, 10, 10), dtype=np.uint8))
 BLUE = colour_histogram(np.full((4, 4, 3), (10, 10, 250), dtype=np.uint8))

@@ -8,10 +8,10 @@ import pytest
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.anime import content_filter, faces, frames, lines, motion, shots, stems
 from tokimeki.media.audio import AudioStream
 from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import content_filter, faces, frames, lines, motion, shots, voice
 
 FRAMES = 72
 CUT = 24
@@ -184,9 +184,9 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lines, "SileroVad", FakeVad)
     monkeypatch.setattr(lines, "decode_audio", fake_audio)
     monkeypatch.setattr(lines, "main_audio", fake_main_audio)
-    monkeypatch.setattr(voice, "VocalSeparator", FakeSeparator)
-    monkeypatch.setattr(voice, "decode_audio", fake_stereo)
-    monkeypatch.setattr(voice, "main_audio", fake_main_audio)
+    monkeypatch.setattr(stems, "VocalSeparator", FakeSeparator)
+    monkeypatch.setattr(stems, "decode_audio", fake_stereo)
+    monkeypatch.setattr(stems, "main_audio", fake_main_audio)
     monkeypatch.setattr(motion, "decode_luma", fake_luma)
     monkeypatch.setattr(motion, "MotionMeter", FakeMeter)
 

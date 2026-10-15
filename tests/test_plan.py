@@ -10,6 +10,8 @@ import pytest
 from clips import make_clip
 
 from tokimeki import api
+from tokimeki.anime import pipeline
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.lines import NewLine, list_lines, replace_lines
 from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus, TagStat
 from tokimeki.library.series import open_series
@@ -21,8 +23,6 @@ from tokimeki.song.analysis import SongAnalysis, SongSource, save_analysis, slot
 from tokimeki.song.lyrics import LyricLine
 from tokimeki.song.slots import Slot
 from tokimeki.song.structure import Section
-from tokimeki.stages import pipeline
-from tokimeki.stages.pipeline import register_episodes
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)
 

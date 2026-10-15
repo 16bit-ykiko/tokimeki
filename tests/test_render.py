@@ -13,6 +13,8 @@ from clips import make_clip
 from test_plan import song
 
 from tokimeki import api
+from tokimeki.anime import pipeline
+from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.series import open_series
 from tokimeki.mad.fonts import Fonts
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
@@ -22,8 +24,6 @@ from tokimeki.mad.video import PREVIEW, RenderSettings
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.song.analysis import SongSource, save_analysis
 from tokimeki.song.lyrics import LyricLine, pair
-from tokimeki.stages import pipeline
-from tokimeki.stages.pipeline import register_episodes
 
 
 def _plan(bounds: list[float]) -> Plan:

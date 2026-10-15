@@ -7,6 +7,7 @@ Voice lines are the dialogue of her scenes that kept shots cover, with who is on
 
 from collections.abc import Mapping, Sequence
 
+from tokimeki.anime.scenes import summaries
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context
 from tokimeki.mad.candidates import Candidate, find_candidates
@@ -19,7 +20,6 @@ from tokimeki.mad.voices import usable_lines
 from tokimeki.song.analysis import SongAnalysis, slots_over
 from tokimeki.song.gaps import gaps, quiet_bars
 from tokimeki.song.lyrics import pair
-from tokimeki.stages.scenes import summaries
 
 type Json = dict[str, object]
 
