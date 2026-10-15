@@ -7,6 +7,7 @@ one commit, and is driven only through subprocesses: its dataset scripts and tra
 """
 
 import json
+import os
 import socket
 import subprocess
 import time
@@ -77,6 +78,11 @@ PRETRAINED = (
     "v2Pro/s2Gv2ProPlus.pth",
     "v2Pro/s2Dv2ProPlus.pth",
 )
+EXTRAS = (("XXXXRT/GPT-SoVITS-Pretrained", "pretrained_models/fast_langdetect/lid.176.bin"),)
+"""Fetched ahead of time: GPT-SoVITS's text splitter downloads this one itself on first use,
+from a host outside the Hub."""
+OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+"""Everything the engine needs is fetched by `install`; nothing is downloaded while it runs."""
 LANGUAGE = "ja"
 SERVER_START_TIMEOUT = 300.0
 
@@ -129,6 +135,8 @@ def install(engine: Engine) -> None:
     (site_packages(engine.root / "venv") / "gpt-sovits.pth").write_text(paths)
     for name in PRETRAINED:
         fetch_to(WEIGHTS_REPO, name, engine.pretrained)
+    for repo, name in EXTRAS:
+        fetch_to(repo, name, engine.repo / "GPT_SoVITS")
     # pyopenjtalk fetches its dictionary on first use; do it now rather than mid-training.
     run([engine.python, "-c", "import pyopenjtalk; pyopenjtalk.g2p('テスト')"], log)
     engine.marker.write_text(json.dumps({"commit": COMMIT, "version": VERSION}))
@@ -173,6 +181,7 @@ def _dataset_env(
         "pretrained_s2G": str(p / "v2Pro/s2Gv2ProPlus.pth"),
         "s2config_path": str(engine.repo / f"GPT_SoVITS/configs/s2{VERSION}.json"),
         "hz": "25hz",
+        **OFFLINE,
     }
 
 
@@ -320,7 +329,7 @@ def train(
     whose weights were written after `listing` (the bank) last changed is not run again."""
     engine.require()
     log = work / "train.log"
-    env = {"_CUDA_VISIBLE_DEVICES": "0", "version": VERSION, "hz": "25hz"}
+    env = {"_CUDA_VISIBLE_DEVICES": "0", "version": VERSION, "hz": "25hz", **OFFLINE}
     sovits_dir, gpt_dir = out / "sovits", out / "gpt"
     # The trainers save into these but do not create them (the web UI does).
     for folder in (sovits_dir, gpt_dir, work / f"logs_s2_{VERSION}", work / "logs_s1"):
@@ -416,6 +425,7 @@ class Server:
                 str(config),
             ],
             cwd=engine.repo,
+            env={**os.environ, **OFFLINE},
             stdout=self._out,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,

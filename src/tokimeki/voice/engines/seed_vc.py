@@ -49,6 +49,8 @@ SNAPSHOTS = (
     ("openai/whisper-small", ("*.json", "*.txt", "model.safetensors")),
 )
 """Models it loads from the default Hub cache."""
+OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+"""Everything is fetched by `install`; nothing is downloaded while it trains or converts."""
 _PREFETCH = """
 import os, sys
 from huggingface_hub import hf_hub_download, snapshot_download
@@ -126,7 +128,7 @@ def fine_tune(engine: Engine, wavs: Path, name: str, steps: int, out: Path) -> P
     args = [engine.python, "train.py", "--config", CONFIG, "--dataset-dir", wavs]
     args += ["--pretrained-ckpt", engine.singing_model(), "--run-name", name]
     args += ["--batch-size", "2", "--max-steps", str(steps), "--save-every", str(steps)]
-    run(args, log, engine.repo)
+    run(args, log, engine.repo, OFFLINE)
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(runs / "ft_model.pth", out)
     return out
@@ -153,7 +155,7 @@ def convert(engine: Engine, job: Conversion, checkpoint: Path | None, out: Path)
     args += ["--inference-cfg-rate", str(job.cfg_rate), "--f0-condition", "True"]
     args += ["--auto-f0-adjust", "False", "--semi-tone-shift", str(job.semitones), "--fp16", "True"]
     args += ["--checkpoint", checkpoint or engine.singing_model(), "--config", CONFIG]
-    run(args, out.parent / "convert.log", engine.repo)
+    run(args, out.parent / "convert.log", engine.repo, OFFLINE)
     found = sorted(work.glob("*.wav"))
     if not found:
         raise EngineError(f"Seed-VC wrote nothing for {job.source.name}")
