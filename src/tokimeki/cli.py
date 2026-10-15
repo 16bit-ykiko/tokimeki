@@ -8,12 +8,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from tokimeki import api
+from tokimeki.cast import clusters
 from tokimeki.library.episodes import list_episodes
 from tokimeki.library.lines import get_line
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context, open_series
 from tokimeki.report import build_report
-from tokimeki.stages import cast, pipeline, scenes
+from tokimeki.stages import pipeline, scenes
 from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.selfcheck import run_checks
 from tokimeki.voice import speakers
@@ -226,7 +227,7 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 def cmd_cast_list(args: argparse.Namespace) -> int:
     ctx = open_series(_series(args))
-    for cluster, hints in cast.clusters_with_hints(ctx):
+    for cluster, hints in clusters.clusters_with_hints(ctx):
         hint = ", ".join(f"{tag} {share:.0%}" for tag, share in hints)
         name = cluster.name or "(unnamed)"
         print(f"{cluster.id:4}  {name:24} {cluster.face_count:5} faces  {hint}")
@@ -236,27 +237,27 @@ def cmd_cast_list(args: argparse.Namespace) -> int:
 def cmd_cast_name(args: argparse.Namespace) -> int:
     cluster: int = args.cluster
     name: str = args.name
-    cast.rename(open_series(_series(args)), cluster, name.strip() or None)
+    clusters.rename(open_series(_series(args)), cluster, name.strip() or None)
     return 0
 
 
 def cmd_cast_merge(args: argparse.Namespace) -> int:
     sources: list[int] = args.source
     target: int = args.target
-    cast.merge(open_series(_series(args)), sources, target)
+    clusters.merge(open_series(_series(args)), sources, target)
     return 0
 
 
 def cmd_cast_recluster(args: argparse.Namespace) -> int:
     ctx = open_series(_series(args))
-    created = cast.recluster(ctx, register_episodes(ctx))
+    created = clusters.recluster(ctx, register_episodes(ctx))
     print(f"{created} clusters besides the named ones")
     return 0
 
 
 def cmd_cast_split(args: argparse.Namespace) -> int:
     cluster: int = args.cluster
-    created = cast.split(open_series(_series(args)), cluster)
+    created = clusters.split(open_series(_series(args)), cluster)
     print(f"cluster {cluster} split; new clusters: {', '.join(map(str, created)) or 'none'}")
     return 0
 
@@ -266,7 +267,7 @@ def cmd_cast_move(args: argparse.Namespace) -> int:
     source: str | None = args.source
     target: str | None = args.to
     try:
-        done = cast.move(open_series(_series(args)), shots, source, target)
+        done = clusters.move(open_series(_series(args)), shots, source, target)
     except (KeyError, ValueError) as error:
         print(f"error: {error.args[0]}", file=sys.stderr)
         return 1
@@ -275,7 +276,7 @@ def cmd_cast_move(args: argparse.Namespace) -> int:
 
 
 def cmd_cast_fixes(args: argparse.Namespace) -> int:
-    for fix, source, target in cast.fixes(open_series(_series(args))):
+    for fix, source, target in clusters.fixes(open_series(_series(args))):
         print(f"shot {fix.shot_id}: {source} -> {target}")
     return 0
 
@@ -284,7 +285,7 @@ def cmd_cast_doubtful(args: argparse.Namespace) -> int:
     ref: str = args.cluster
     limit: int = args.limit
     try:
-        doubts = cast.doubtful(open_series(_series(args)), ref, limit)
+        doubts = clusters.doubtful(open_series(_series(args)), ref, limit)
     except KeyError as error:
         print(f"error: {error.args[0]}", file=sys.stderr)
         return 1

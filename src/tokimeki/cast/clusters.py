@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.cast.clustering import average_linkage, evenly_spaced
 from tokimeki.library.cast import (
     CastFix,
     apply_cast_fixes,
@@ -37,7 +38,6 @@ from tokimeki.library.records import Cluster, Episode
 from tokimeki.library.series import Context
 from tokimeki.library.shots import get_shot
 from tokimeki.models.ccip import ccip_differences
-from tokimeki.stages.clustering import average_linkage, evenly_spaced
 
 CLUSTER_THRESHOLD = 0.15
 """Faces stay in one cluster while their mean CCIP difference is at most this.

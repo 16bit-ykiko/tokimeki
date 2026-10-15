@@ -9,6 +9,9 @@ from clips import make_clip
 from numpy.typing import NDArray
 from PIL import Image
 
+from tokimeki.cast import clusters
+from tokimeki.cast.clustering import average_linkage, evenly_spaced
+from tokimeki.cast.clusters import MIN_CLUSTER_FACES, assign_clusters, split_cluster
 from tokimeki.library import cast as cast_db
 from tokimeki.library import episodes as episode_db
 from tokimeki.library import shots as shot_db
@@ -17,9 +20,7 @@ from tokimeki.library.records import Box, Rating
 from tokimeki.library.series import open_series
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
-from tokimeki.stages import cast, pipeline
-from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, split_cluster
-from tokimeki.stages.clustering import average_linkage, evenly_spaced
+from tokimeki.stages import pipeline
 from tokimeki.stages.faces import head_box
 from tokimeki.stages.pipeline import register_episodes
 
@@ -149,11 +150,11 @@ def test_recluster_keeps_named_clusters(tmp_path: Path, monkeypatch: pytest.Monk
     episodes = register_episodes(ctx)
     pipeline.run(ctx, episodes)
     (cluster,) = cast_db.list_clusters(ctx.conn)
-    assert cast.recluster(ctx, episodes) == 1
+    assert clusters.recluster(ctx, episodes) == 1
     (renewed,) = cast_db.list_clusters(ctx.conn)
     assert renewed.id != cluster.id
-    cast.rename(ctx, renewed.id, "Momo")
-    assert cast.recluster(ctx, episodes) == 0
+    clusters.rename(ctx, renewed.id, "Momo")
+    assert clusters.recluster(ctx, episodes) == 0
     assert cast_db.list_clusters(ctx.conn)[0].name == "Momo"
 
 
@@ -206,25 +207,25 @@ def test_moved_shots_stay_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     episodes = register_episodes(ctx)
     pipeline.run(ctx, episodes)
     (cluster,) = cast_db.list_clusters(ctx.conn)
-    cast.rename(ctx, cluster.id, "Momo")
+    clusters.rename(ctx, cluster.id, "Momo")
     nana = cast_db.create_cluster(ctx.conn, "Nana")
     (shot,) = cast_db.named_cast_by_shot(ctx.conn, episodes[1].id)
 
-    assert cast.move(ctx, [shot], None, "Nana") == [f"shot {shot}: Momo -> Nana"]
+    assert clusters.move(ctx, [shot], None, "Nana") == [f"shot {shot}: Momo -> Nana"]
     assert _counts(ctx.conn) == {"Momo": 4, "Nana": 4}
-    cast.recluster(ctx, episodes)
-    cast.split(ctx, nana)
+    clusters.recluster(ctx, episodes)
+    clusters.split(ctx, nana)
     pipeline.redo(ctx, episodes[1:], "cast")
     pipeline.run(ctx, episodes)
     assert _counts(ctx.conn) == {"Momo": 4, "Nana": 4}
     assert [n for n, _ in cast_db.named_cast_by_shot(ctx.conn, episodes[1].id)[shot]] == ["Nana"]
-    assert [(src, dst) for _, src, dst in cast.fixes(ctx)] == [("Momo", "Nana")]
+    assert [(src, dst) for _, src, dst in clusters.fixes(ctx)] == [("Momo", "Nana")]
 
-    cast.move(ctx, [shot], "Nana", None)
-    cast.recluster(ctx, episodes)
+    clusters.move(ctx, [shot], "Nana", None)
+    clusters.recluster(ctx, episodes)
     assert _counts(ctx.conn) == {"Momo": 4, "Nana": 0}
     with pytest.raises(ValueError, match="nobody named"):
-        cast.move(ctx, [shot], None, "Momo")
+        clusters.move(ctx, [shot], None, "Momo")
 
 
 def test_doubtful_shots_look_like_someone_else(tmp_path: Path) -> None:
@@ -237,6 +238,6 @@ def test_doubtful_shots_look_like_someone_else(tmp_path: Path) -> None:
         cast_db.assign_faces(ctx.conn, [f.face.id for f in faces], cluster)
     _named(ctx.conn, _add_episode_faces(ctx.conn, "ep04.mkv", [0.6, 0.62]), "Nana")
 
-    first, *_ = cast.doubtful(ctx, "Momo", 5)
+    first, *_ = clusters.doubtful(ctx, "Momo", 5)
     assert (first.shot_id, first.nearest) == (_shot_of(ctx.conn, odd), "Nana")
     assert first.margin < 0 and first.keyframe.endswith(".jpg")
