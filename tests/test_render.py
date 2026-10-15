@@ -143,6 +143,16 @@ def test_render_flashes_and_zooms(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     luma = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).mean(axis=(1, 2))
     assert len(luma) == round(1.25 * Fraction(24000, 1001))
     assert luma[0] > 250 and luma[1] > luma[2] + 30 and luma[2] < 200
+    flash = Plan("flash", str(root), "", "test-song", [SlotPlan(0.0, 1.25, 2, fx=[Fx("flash")])])
+    result = api.render_plan(str(_write(tmp_path, flash)), "preview", subs="none")
+    video = next(o for o in cast(list[str], result["outputs"]) if o.endswith("preview.mp4"))
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", video, "-vf", "scale=32:18,format=gray",
+         "-f", "rawvideo", "-"],
+        capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    plain = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).mean(axis=(1, 2))
+    assert plain[0] > plain[3] + 30 and len(plain) == len(luma)
 
 
 def _write(tmp_path: Path, plan: Plan) -> Path:
