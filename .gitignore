@@ -8,6 +8,7 @@ __pycache__/
 
 # Media and analysis output never go into git: they live in the data directory
 data/
+!tests/data/
 *.mkv
 *.mp4
 *.webm
