@@ -18,8 +18,9 @@ from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.stages import cast, pipeline
 from tokimeki.stages.base import open_series
-from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, head_box, split_cluster
+from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, split_cluster
 from tokimeki.stages.clustering import average_linkage, evenly_spaced
+from tokimeki.stages.faces import head_box
 from tokimeki.stages.pipeline import register_episodes
 
 

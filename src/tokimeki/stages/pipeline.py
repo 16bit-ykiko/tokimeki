@@ -6,7 +6,7 @@ from tokimeki.library.episodes import find_episode, list_episodes, register_epis
 from tokimeki.library.records import Episode, ShotStatus
 from tokimeki.library.shots import status_counts
 from tokimeki.media.probe import probe
-from tokimeki.stages import cast, content_filter, lines, motion, scenes, shots, voice
+from tokimeki.stages import content_filter, faces, lines, motion, scenes, shots, voice
 from tokimeki.stages.base import Context
 
 log = logging.getLogger("tokimeki")
@@ -22,7 +22,7 @@ class Stage:
 STAGES = (
     Stage(shots.NAME, shots.run, shots.reset),
     Stage(content_filter.NAME, content_filter.run, content_filter.reset),
-    Stage(cast.NAME, cast.run, cast.reset),
+    Stage(faces.NAME, faces.run, faces.reset),
     Stage(lines.NAME, lines.run, lines.reset),
     Stage(scenes.NAME, scenes.run, scenes.reset),
     Stage(voice.NAME, voice.run, voice.reset),

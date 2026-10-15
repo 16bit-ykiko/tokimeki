@@ -11,7 +11,7 @@ from PIL import Image
 from tokimeki.media.audio import AudioStream
 from tokimeki.models.faces import Detection
 from tokimeki.models.wd14 import Prediction
-from tokimeki.stages import cast, content_filter, frames, lines, motion, shots, voice
+from tokimeki.stages import content_filter, faces, frames, lines, motion, shots, voice
 
 FRAMES = 72
 CUT = 24
@@ -179,8 +179,8 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shots, "decode_for_transnet", fake_decode)
     monkeypatch.setattr(frames, "extract_frames", fake_extract)
     monkeypatch.setattr(content_filter, "Wd14Tagger", FakeTagger)
-    monkeypatch.setattr(cast, "FaceDetector", FakeDetector)
-    monkeypatch.setattr(cast, "CcipEncoder", FakeEncoder)
+    monkeypatch.setattr(faces, "FaceDetector", FakeDetector)
+    monkeypatch.setattr(faces, "CcipEncoder", FakeEncoder)
     monkeypatch.setattr(lines, "SileroVad", FakeVad)
     monkeypatch.setattr(lines, "decode_audio", fake_audio)
     monkeypatch.setattr(lines, "main_audio", fake_main_audio)
