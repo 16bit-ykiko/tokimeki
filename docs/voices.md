@@ -1,6 +1,6 @@
 # Character voices
 
-Speakers work; transcripts, voice banks and voice models are next.
+Speakers, transcripts, voice banks, a speaking voice model (GPT-SoVITS) and a singing one (Seed-VC) work; all of it stays on this machine.
 
 ## Usage
 
@@ -12,7 +12,18 @@ pixi run tokimeki voice page ~/anime/<series>        # the listening page, then:
 pixi run tokimeki serve                              # http://127.0.0.1:8780/voice/<series>/page/ (localhost only)
 pixi run tokimeki voice accept ~/anime/<series>      # name speakers by their suggestion
 pixi run tokimeki voice name|merge|move|fixes|recluster|lines …   # correct by ear
+pixi run tokimeki voice transcribe ~/anime/<series>  # Japanese text of every voiced line (GPU)
+pixi run tokimeki voice bank ~/anime/<series> 梦梦    # her clips and texts in trainer formats
+net-guard pixi run tokimeki voice install gpt-sovits # and seed-vc: engines in their own venvs
+pixi run tokimeki voice train ~/anime/<series> 梦梦   # fine-tune GPT-SoVITS (takes the GPU)
+pixi run tokimeki voice style ~/anime/<series> 梦梦 teasing --line 581   # a reference per style
+pixi run tokimeki voice say ~/anime/<series> 梦梦 "日本語のテキスト" --style teasing -o out.wav
+pixi run tokimeki voice samples ~/anime/<series> 梦梦 --new "teasing:…" --new "…"
+pixi run tokimeki voice train-singing ~/anime/<series> 梦梦      # fine-tune Seed-VC on her bank
+pixi run tokimeki voice cover ~/anime/<series> 梦梦 SONG --name NAME [--track N --instrumental …]
 ```
+
+GPU jobs (`speakers`, `transcribe`, `train`, `say`, `samples`, `train-singing`, `cover`) take one model at a time; when several sessions share the card, run them under `flock ~/.local/share/tokimeki/gpu.lock`.
 
 Names and moves are kept like the cast's: `recluster` and a redone `speakers` stage keep named speakers and their lines, and `move --line N --to NAME` (or `--nobody`) pins a line through every later clustering. `tokimeki voice speakers` runs after `ingest`, per episode, and skips episodes whose voices are newer than their lines and stem. The JSON API has the same data (`api.voice_speakers`), for the web UI to come.
 
@@ -28,12 +39,19 @@ ep01 holds 2.3 min of clean Momo speech (47 lines), 1.5 min of Rito, 1.1 min of 
 
 ## 2. Transcripts
 
-Japanese text for each line from an anime-tuned Whisper on the voice stem (the subtitles at hand are Chinese).
+Japanese text for every line with a voice, from the voice stem (the subtitles at hand are Chinese): [Anime Whisper](https://huggingface.co/litagin/anime-whisper) (kotoba-whisper-v2.0 fine-tuned on 5,300 h of visual-novel lines, MIT), fp16 on CUDA, no initial prompt (it hallucinates with one). On its author's unseen visual-novel test it has 13% CER against whisper-large-v3's 16.5% and kotoba-whisper-v2.0's 18.8%, and it keeps the stammers, laughs and breaths a TTS bank should hear. S1 01–07 (1,709 lines) take 11 min. Names come out in the kanji of the games it was trained on (モモ as 桃, 春菜 as 春奈), which reads the same; a few lines come out garbled, mostly names (デビルーク).
 
 ## 3. Voice bank
 
-Per character: clean clips, their Japanese text and delivery tags (calm, shy, angry, shouting …), exported in the layouts TTS trainers take (`path|speaker|lang|text`).
+`voice bank` writes a named speaker's clean, transcribed lines of 1–12 s as 44.1 kHz WAVs with a 10 ms fade, `gpt-sovits.list` (`absolute path|speaker|ja|text`), `esd.list` (`name|speaker|JP|text`, for Style-Bert-VITS2) and `bank.json` (lines, minutes per episode, what was left out), in `.tokimeki/voice/<character>/bank/`.
 
-## 4. Voice model
+Read the bank's texts before training: a speaker cluster can hold another voice. On S1 01–07, Momo's 321 lines held Mikado-sensei (no named face, so her scenes with Momo gave Momo the seeds), Rito turned girl, and male classmates; 62 lines went out with `voice move --nobody` (wrong speaker, or a garbled transcript), leaving 248 lines, 11.9 min.
 
-GPT-SoVITS v2ProPlus (MIT) fine-tuned on one bank, in its own environment behind a typed wrapper (subprocess and its local HTTP API), with a zero-shot baseline for comparison. Training and inference fit in 8 GB, one model at a time. Irodori-TTS is not used to clone: its model card forbids cloning a voice actor's voice. Voice banks, models and generated speech stay in the data directory and are never shared.
+## 4. Voice models
+
+External engines run from their own checkouts and venvs under `$TOKIMEKI_HOME/engines`, pinned to one commit and driven through subprocesses and local HTTP only (`voice/engines/`). Each venv is built on tokimeki's own Python with its site packages visible, so they run on the CUDA PyTorch already installed instead of a second copy; PyTorch, torchaudio and NumPy are kept out of their resolution, and the few torchaudio calls they make come from a small stand-in (`voice/engines/standin/`), since conda-forge builds no torchaudio for this PyTorch.
+
+- **Speech: GPT-SoVITS v2ProPlus** (MIT). `voice train` runs the web UI's dataset steps (phonemes, HuBERT features, speaker vectors, semantic tokens) and fine-tunes SoVITS then GPT on the bank; `voice say` and `voice samples` start its `api_v2.py` on localhost with the trained weights (or the pretrained ones, `--zero-shot`, as the baseline) and speak like a reference clip of hers (a named `style`, or her most typical 3–10 s line). Irodori-TTS is not used to clone: its model card forbids cloning a voice actor's voice.
+- **Singing: Seed-VC** (GPL-3.0, used as an external program only). Its singing model (Whisper-small content, RMVPE pitch, BigVGAN 44.1 kHz) converts a sung vocal into her voice zero-shot from 25 s of her clips, or after a short fine-tune on her bank (`voice train-singing`). `voice cover` separates the song's vocal with MDX-Net, converts it and mixes it back over the release's instrumental (aligned to the mix by envelope correlation) or over what separation left.
+
+Voice banks, models and generated speech stay in the data directory and are never shared.

@@ -231,7 +231,7 @@ def s2_config(
 def s1_config(
     engine: Engine, work: Path, out: Path, name: str, settings: TrainSettings
 ) -> dict[str, object]:
-    """`s1longer-v2.yaml` with the web UI's settings (written as JSON, which YAML reads)."""
+    """`s1longer-v2.yaml` with the web UI's settings."""
     return {
         "train": {
             "seed": 1234,
@@ -281,21 +281,64 @@ def _newest(directory: Path, pattern: str) -> Path:
     return found[-1]
 
 
-def train(engine: Engine, work: Path, out: Path, name: str, settings: TrainSettings) -> Weights:
-    """Fine-tune SoVITS, then GPT, on a prepared dataset; the weights go to `out`."""
+def _trained_since(directory: Path, pattern: str, since: Path) -> Path | None:
+    """Weights matching `pattern` written after `since` changed, if any: a stage to skip."""
+    found = [p for p in directory.glob(pattern) if p.stat().st_mtime > since.stat().st_mtime]
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+
+
+def yaml_text(data: object, indent: int = 0) -> str:
+    """Nested mappings of strings, numbers and booleans as block YAML. Floats are written
+    with a decimal point, since PyYAML reads `1e-05` as a string."""
+    pad = "  " * indent
+    if not isinstance(data, dict):
+        raise EngineError("only mappings are written as YAML here")
+    out = ""
+    for key, value in cast(dict[str, object], data).items():
+        if isinstance(value, dict):
+            out += f"{pad}{key}:\n{yaml_text(cast(dict[str, object], value), indent + 1)}"
+        else:
+            out += f"{pad}{key}: {_scalar(value)}\n"
+    return out
+
+
+def _scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        text = repr(value)
+        return text if "e" not in text else f"{value:.12f}".rstrip("0")
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def train(
+    engine: Engine, work: Path, out: Path, name: str, settings: TrainSettings, listing: Path
+) -> Weights:
+    """Fine-tune SoVITS, then GPT, on a prepared dataset; the weights go to `out`. A stage
+    whose weights were written after `listing` (the bank) last changed is not run again."""
     engine.require()
     log = work / "train.log"
     env = {"_CUDA_VISIBLE_DEVICES": "0", "version": VERSION, "hz": "25hz"}
     sovits_dir, gpt_dir = out / "sovits", out / "gpt"
-    sovits_dir.mkdir(parents=True, exist_ok=True)
-    gpt_dir.mkdir(parents=True, exist_ok=True)
-    s2 = work / "s2.json"
-    s2.write_text(json.dumps(s2_config(engine, work, sovits_dir, name, settings), indent=1))
-    run([engine.python, "-s", "GPT_SoVITS/s2_train.py", "--config", s2], log, engine.repo, env)
-    s1 = work / "s1.yaml"
-    s1.write_text(json.dumps(s1_config(engine, work, gpt_dir, name, settings), indent=1))
-    run([engine.python, "-s", "GPT_SoVITS/s1_train.py", "--config_file", s1], log, engine.repo, env)
-    return Weights(_newest(gpt_dir, "*.ckpt"), _newest(sovits_dir, "*.pth"))
+    # The trainers save into these but do not create them (the web UI does).
+    for folder in (sovits_dir, gpt_dir, work / f"logs_s2_{VERSION}", work / "logs_s1"):
+        folder.mkdir(parents=True, exist_ok=True)
+    sovits = _trained_since(sovits_dir, f"{name}_e{settings.sovits_epochs}_*.pth", listing)
+    if sovits is None:
+        s2 = work / "s2.json"
+        s2.write_text(json.dumps(s2_config(engine, work, sovits_dir, name, settings), indent=1))
+        run([engine.python, "-s", "GPT_SoVITS/s2_train.py", "--config", s2], log, engine.repo, env)
+        sovits = _newest(sovits_dir, f"{name}_e{settings.sovits_epochs}_*.pth")
+    gpt = _trained_since(gpt_dir, f"{name}-e{settings.gpt_epochs}.ckpt", listing)
+    if gpt is None:
+        s1 = work / "s1.yaml"
+        s1.write_text(yaml_text(s1_config(engine, work, gpt_dir, name, settings)))
+        s1_train = [engine.python, "-s", "GPT_SoVITS/s1_train.py", "--config_file", s1]
+        run(s1_train, log, engine.repo, env)
+        gpt = _newest(gpt_dir, f"{name}-e{settings.gpt_epochs}.ckpt")
+    return Weights(gpt, sovits)
 
 
 @dataclass(frozen=True, slots=True)

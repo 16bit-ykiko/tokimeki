@@ -60,16 +60,18 @@ def train(ctx: Context, character: str, settings: TrainSettings) -> TrainReport:
     bank = bank_dir(ctx.paths, character)
     root = model_dir(ctx.paths, character, gpt_sovits.NAME)
     work = root / "work"
-    if work.exists():
+    listing = bank / "gpt-sovits.list"
+    prepared_text = work / "2-name2text.txt"
+    if prepared_text.exists() and prepared_text.stat().st_mtime < listing.stat().st_mtime:
         for stale in work.glob("*"):
             if stale.is_file():
                 stale.unlink()
     work.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     with MemoryPeak() as peak:
-        gpt_sovits.prepare(engine, bank / "gpt-sovits.list", bank / "wavs", work, character)
+        gpt_sovits.prepare(engine, listing, bank / "wavs", work, character)
         prepared = time.monotonic()
-        weights = gpt_sovits.train(engine, work, root, character, settings)
+        weights = gpt_sovits.train(engine, work, root, character, settings, listing)
     report = TrainReport(
         character,
         len(lines),

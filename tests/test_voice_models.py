@@ -140,3 +140,9 @@ def test_instrumental_is_aligned_to_the_mix_and_the_vocal_mixed_in() -> None:
     assert out.shape == (2, 1000) and out[0, 10] == pytest.approx(0.1)
     loud = mix(vocal, np.ones((2, 1000), dtype=np.float32), 1.0)
     assert np.abs(loud).max() <= 0.98 + 1e-6
+
+
+def test_gpt_config_yaml_keeps_small_floats_numbers() -> None:
+    text = gpt_sovits.yaml_text({"optimizer": {"lr_init": 0.00001, "steps": 2000}, "on": True})
+    assert text == "optimizer:\n  lr_init: 0.00001\n  steps: 2000\non: true\n"
+    assert gpt_sovits.yaml_text({"path": "/a b/梦梦"}) == 'path: "/a b/梦梦"\n'
