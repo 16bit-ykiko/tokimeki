@@ -13,7 +13,17 @@ from tokimeki.library.episodes import find_episode, get_episode
 from tokimeki.library.lines import get_line, list_parts, shots_in_parts
 from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus
 from tokimeki.library.shots import get_shot, kept_ranges
-from tokimeki.mad.plan import MAX_SPEED, MIN_SPEED, Plan, VoicePlan
+from tokimeki.mad.fx import STRONG_ACCENT
+from tokimeki.mad.plan import (
+    FLASH_FRAME_RANGE,
+    FX_KINDS,
+    MAX_SPEED,
+    MIN_SPEED,
+    ZOOM_RANGE,
+    Plan,
+    SlotPlan,
+    VoicePlan,
+)
 from tokimeki.mad.refine import beat_grid, edge, nearest
 from tokimeki.mad.song.analysis import SongAnalysis
 from tokimeki.mad.song.gaps import sung_overlap
@@ -209,6 +219,86 @@ def _timing(plan: Plan, analysis: SongAnalysis) -> list[Issue]:
     return issues
 
 
+DRIFT_SLOT = 1.0
+"""A drift over a shorter slot is a zoom, not a drift."""
+USES = {
+    "flash": {"frames", "strength"},
+    "punch": {"at", "zoom", "focus"},
+    "drift": {"zoom", "focus"},
+}
+
+
+def _effects(i: int, slot: SlotPlan, analysis: SongAnalysis, fps: Fraction) -> list[Issue]:
+    issues: list[Issue] = []
+    seen: set[str] = set()
+    for f in slot.fx:
+        if f.kind not in FX_KINDS:
+            issues.append(
+                _error("fx.unknown", i, f"unknown effect {f.kind!r}; known: {', '.join(FX_KINDS)}")
+            )
+            continue
+        if f.kind in seen:
+            issues.append(_error("fx.repeat", i, f"{f.kind} is given twice"))
+        seen.add(f.kind)
+        given = {
+            name
+            for name, value in (
+                ("at", f.at), ("zoom", f.zoom), ("frames", f.frames),
+                ("strength", f.strength), ("focus", f.focus),
+            )
+            if value is not None
+        }  # fmt: skip
+        for name in sorted(given - USES[f.kind]):
+            issues.append(_warning("fx.ignored", i, f"{f.kind} does not use {name}"))
+        low, high = ZOOM_RANGE
+        if f.kind != "flash" and f.zoom is not None and not low < f.zoom <= high:
+            issues.append(
+                _error("fx.zoom", i, f"{f.kind} zoom {f.zoom:g} is outside {low:g}-{high:g}")
+            )
+        if f.kind == "flash" and f.frames is not None:
+            first, last = FLASH_FRAME_RANGE
+            if not first <= f.frames <= last:
+                issues.append(
+                    _error("fx.frames", i, f"flash over {f.frames} frames; {first}-{last} allowed")
+                )
+        if f.kind == "flash" and f.strength is not None and not 0 < f.strength <= 1:
+            issues.append(_error("fx.strength", i, f"flash strength {f.strength:g} is not in 0-1"))
+        if f.focus is not None and f.kind != "flash" and not all(0 <= v <= 1 for v in f.focus):
+            issues.append(_error("fx.focus", i, f"focus {list(f.focus)} is outside the frame"))
+        if f.kind == "drift" and slot.duration < DRIFT_SLOT:
+            issues.append(_warning("fx.short", i, f"a drift over {slot.duration:.2f}s"))
+        if f.kind == "punch":
+            issues += _punch(i, slot, f.at, analysis, fps)
+    return issues
+
+
+def _punch(
+    i: int, slot: SlotPlan, at: float | None, analysis: SongAnalysis, fps: Fraction
+) -> list[Issue]:
+    if at is None:
+        return [_warning("fx.at", i, "punch has no beat yet; `plan refine` picks the strongest")]
+    if not slot.start + 2 / fps <= at < slot.end - 1 / fps:
+        return [_error("fx.at", i, f"punch at {at:.3f}s is not inside the slot")]
+    grid = analysis.beats
+    if not grid:
+        return [_error("fx.accent", i, "the song has no beats")]
+    index = min(range(len(grid)), key=lambda j: abs(grid[j] - at))
+    if abs(grid[index] - at) > BEAT_TOLERANCE:
+        return [_error("fx.accent", i, f"punch at {at:.3f}s is not on a beat")]
+    strength = analysis.accents[index] if analysis.accents is not None else None
+    marked = slot.accent is not None and abs(slot.accent - at) <= BEAT_TOLERANCE
+    if strength is not None and strength < STRONG_ACCENT and not marked:
+        return [
+            _error(
+                "fx.accent",
+                i,
+                f"the beat at {grid[index]:.3f}s hits {strength:.2f}, under {STRONG_ACCENT};"
+                " punch on a strong accent or the slot's `accent`",
+            )
+        ]
+    return []
+
+
 def _shot_issues(conn: sqlite3.Connection, plan: Plan) -> list[Issue]:
     issues: list[Issue] = []
     episodes: dict[int, Episode] = {}
@@ -341,4 +431,6 @@ def validate(conn: sqlite3.Connection, plan: Plan, analysis: SongAnalysis | None
         issues.append(_error("song.unknown", None, f"song {plan.song!r} has not been analysed"))
     else:
         issues += _timing(plan, analysis)
+        for i, slot in enumerate(plan.slots):
+            issues += _effects(i, slot, analysis, plan.frame_rate)
     return issues + _shot_issues(conn, plan) + _voices(conn, plan, analysis)

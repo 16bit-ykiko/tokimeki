@@ -180,6 +180,7 @@ def cmd_plan_auto(args: argparse.Namespace) -> int:
     max_slots: int | None = args.max_slots
     beats = _beats(args.beats)
     voices: bool = args.voices
+    fx: bool = args.fx
     return _emit(
         lambda: api.plan_auto(
             series,
@@ -194,6 +195,7 @@ def cmd_plan_auto(args: argparse.Namespace) -> int:
             max_slots,
             beats,
             voices,
+            fx,
         )
     )
 
@@ -492,6 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("-o", "--output", help="where to write the plan (default: the data dir)")
     auto.add_argument(
         "--no-voices", dest="voices", action="store_false", help="no original line in a gap"
+    )
+    auto.add_argument(
+        "--no-fx", dest="fx", action="store_false", help="no flashes, punches or drifts"
     )
     check = plan_sub.add_parser("validate", help="every problem with a plan; exit 1 on errors")
     check.set_defaults(handler=cmd_plan_validate)

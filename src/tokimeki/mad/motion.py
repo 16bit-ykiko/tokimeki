@@ -20,6 +20,8 @@ ACTIVE = 0.015
 CALM = 6
 BURST = 12
 """Frames after an onset over which its strength (the most pixels changed) is taken."""
+MIN_SYNC_ONSET = 0.03
+"""Onsets moving fewer pixels than this (a lip flap) are not worth aligning or watching."""
 STILL_MOVING = 0.15
 STILL_PAN = 0.003
 """A still shot moves in at most `STILL_MOVING` of its frames and its median mean difference

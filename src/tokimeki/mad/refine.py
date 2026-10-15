@@ -6,7 +6,8 @@ centred on the shot's cutest sampled frame, kept off the shot's edges, and slowe
 most when the shot is a little shorter than its slot. Then (for windows refine fills, or any
 slot with `sync`) the window slides, same length and speed, so the strongest movement that
 starts in the shot (a head turn, a blink, a jump) begins on the cut or on an accent beat,
-the expression peak staying inside.
+the expression peak staying inside. Effects get what they leave out: a punch's beat, the
+focus on her face, the default sizes.
 """
 
 import math
@@ -16,7 +17,8 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 
 from tokimeki.mad.candidates import Candidate
-from tokimeki.mad.motion import Onset, ShotMotion
+from tokimeki.mad.fx import resolve
+from tokimeki.mad.motion import MIN_SYNC_ONSET, Onset, ShotMotion
 from tokimeki.mad.plan import MAX_SPEED, MIN_SPEED, Plan, SlotPlan
 from tokimeki.mad.song.analysis import SongAnalysis
 
@@ -24,8 +26,6 @@ EDGE_FRAMES = 2
 """Frames kept off each end of a shot, where transitions and stray frames sit."""
 PEAK_AT = 0.5
 """Where in the clip the peak lands, as a share of its length."""
-MIN_SYNC_ONSET = 0.03
-"""Onsets moving fewer pixels than this (a lip flap) are not worth aligning."""
 CUT_LEAD = 1
 """Frames after the cut a movement starts, so the eye sees it begin."""
 PEAK_MARGIN = 0.15
@@ -183,14 +183,17 @@ def refine(
                     f" window {moved - first:+.2f}s"
                 )
                 first = moved
-        slots.append(
-            replace(
-                slot,
-                source_in=round(first, 4),
-                source_out=round(first + length, 4),
-                speed=round(length / slot.duration, 4),
-                section=slot.section or section_at(analysis, start),
-                episode=slot.episode or candidate.episode.path,
-            )
+        placed = replace(
+            slot,
+            source_in=round(first, 4),
+            source_out=round(first + length, 4),
+            speed=round(length / slot.duration, 4),
+            section=slot.section or section_at(analysis, start),
+            episode=slot.episode or candidate.episode.path,
         )
+        effects = [resolve(f, placed, candidate, analysis) for f in placed.fx]
+        for before, after in zip(placed.fx, effects, strict=True):
+            if before.kind == "punch" and before.at is None and after.at is not None:
+                notes.append(f"slot {i}: punch on the beat at {after.at:.2f}s")
+        slots.append(replace(placed, fx=effects))
     return replace(plan, slots=slots), notes

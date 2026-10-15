@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import fakes
+import numpy as np
 import pytest
 from clips import make_clip
 from test_plan import song
@@ -16,7 +17,7 @@ from tokimeki import api
 from tokimeki.anime import pipeline
 from tokimeki.anime.pipeline import register_episodes
 from tokimeki.library.series import open_series
-from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
+from tokimeki.mad.plan import Fx, Plan, SlotPlan, VoicePlan
 from tokimeki.mad.render import clip_key, slot_frames
 from tokimeki.mad.song.analysis import SongSource, save_analysis
 from tokimeki.mad.song.lyrics import LyricLine, pair
@@ -110,6 +111,38 @@ def test_render_joins_clips_on_the_beat(tmp_path: Path, monkeypatch: pytest.Monk
     ass = next(o for o in outputs if o.endswith("subtitles.ass"))
     assert "「嗯」" in Path(ass).read_text(encoding="utf-8-sig")
     assert (root / ".tokimeki/mads/t/report.html").exists()
+
+
+@pytest.mark.gpu
+def test_render_flashes_and_zooms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TOKIMEKI_HOME", str(tmp_path / "home"))
+    root = tmp_path / "series"
+    root.mkdir()
+    make_clip(root / "ep01.mkv", ["testsrc2", "color=c=blue"], seconds=3)
+    fakes.install(monkeypatch)
+    ctx = open_series(root)
+    pipeline.run(ctx, register_episodes(ctx))
+    audio = tmp_path / "song.flac"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=3", str(audio)], check=True
+    )
+    analysis = song(0.25, 3.0)
+    accents = [0.9 if abs(b - 0.75) < 1e-6 else 0.3 for b in analysis.beats]
+    save_analysis(replace(analysis, source=SongSource(audio, 0.0, 3.0, "Test"), accents=accents))
+    fx = [Fx("flash", frames=2, strength=1.0), Fx("punch"), Fx("drift")]
+    plan = Plan("fx", str(root), "", "test-song", [SlotPlan(0.0, 1.25, 2, fx=fx)])
+    result = api.render_plan(str(_write(tmp_path, plan)), "preview", subs="none")
+    refined = Plan.from_json((root / ".tokimeki/mads/fx/plan.json").read_text())
+    assert refined.slots[0].fx[1].at == 0.75
+    video = next(o for o in cast(list[str], result["outputs"]) if o.endswith("preview.mp4"))
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", video, "-vf", "scale=32:18,format=gray",
+         "-f", "rawvideo", "-"],
+        capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    luma = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).mean(axis=(1, 2))
+    assert len(luma) == round(1.25 * Fraction(24000, 1001))
+    assert luma[0] > 250 and luma[1] > luma[2] + 30 and luma[2] < 200
 
 
 def _write(tmp_path: Path, plan: Plan) -> Path:

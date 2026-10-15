@@ -9,6 +9,7 @@ from PIL import Image
 
 from tokimeki.library.paths import SeriesPaths
 from tokimeki.mad.candidates import Candidate
+from tokimeki.mad.fx import describe
 from tokimeki.mad.plan import Plan
 from tokimeki.media.images import load_image
 
@@ -60,6 +61,8 @@ def write_report(
         window = "not placed"
         if slot.source_in is not None and speed is not None:
             window = f"{_clock(slot.source_in)} for {slot.duration * speed:.2f}s at {speed:.2f}x"
+        if slot.fx:
+            window += f"<br>{escape(describe(slot.fx))}"
         rows.append(
             f"<tr><td>{i}</td><td>{escape(slot.section)}<br>"
             f'<span class="muted">{_clock(slot.start)}, {slot.duration:.2f}s</span></td>'

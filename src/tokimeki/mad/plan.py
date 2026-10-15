@@ -28,6 +28,12 @@ class PlanFormatError(ValueError):
 
 
 FX_KINDS = ("flash", "punch", "drift")
+FLASH_FRAMES = 3
+FLASH_FRAME_RANGE = (1, 4)
+FLASH_STRENGTH = 0.85
+PUNCH_ZOOM = 1.12
+DRIFT_ZOOM = 1.08
+ZOOM_RANGE = (1.0, 1.3)
 
 
 @dataclass
@@ -462,22 +468,25 @@ PLAN_JSON_SCHEMA: Json = {
                                         },
                                         "at": {
                                             "type": "number",
-                                            "description": "punch: the accent beat (song s);"
-                                            " refine picks the slot's strongest.",
+                                            "description": "punch: the accent beat (song s),"
+                                            " a strong one from the context's accents or the"
+                                            " slot's `accent`; refine picks the slot's strongest.",
                                         },
                                         "zoom": {
                                             "type": "number",
-                                            "description": "punch (1.12) and drift (1.08):"
-                                            " how far in; 1-1.3.",
+                                            "description": f"punch ({PUNCH_ZOOM}) and drift"
+                                            f" ({DRIFT_ZOOM}): how far in;"
+                                            f" {ZOOM_RANGE[0]:g}-{ZOOM_RANGE[1]:g}.",
                                         },
                                         "frames": {
                                             "type": "integer",
-                                            "description": "flash: 1-4 (3).",
+                                            "description": f"flash: {FLASH_FRAME_RANGE[0]}-"
+                                            f"{FLASH_FRAME_RANGE[1]} ({FLASH_FRAMES}).",
                                         },
                                         "strength": {
                                             "type": "number",
                                             "description": "flash: whiteness at the cut,"
-                                            " 0-1 (0.85).",
+                                            f" 0-1 ({FLASH_STRENGTH}).",
                                         },
                                         "focus": {
                                             "type": "array",

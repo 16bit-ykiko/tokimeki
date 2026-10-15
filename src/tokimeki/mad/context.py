@@ -11,8 +11,20 @@ from tokimeki.anime.scenes import summaries
 from tokimeki.library.records import Episode
 from tokimeki.library.series import Context
 from tokimeki.mad.candidates import Candidate, find_candidates
+from tokimeki.mad.fx import STRONG_ACCENT, strong_accents
 from tokimeki.mad.motion import ShotMotion, motions
-from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
+from tokimeki.mad.plan import (
+    DEFAULT_FPS,
+    DRIFT_ZOOM,
+    FLASH_FRAME_RANGE,
+    FLASH_FRAMES,
+    FLASH_STRENGTH,
+    FX_KINDS,
+    MAX_SPEED,
+    MIN_SPEED,
+    PUNCH_ZOOM,
+    ZOOM_RANGE,
+)
 from tokimeki.mad.refine import EDGE_FRAMES
 from tokimeki.mad.song.analysis import SongAnalysis, slots_over
 from tokimeki.mad.song.gaps import gaps, quiet_bars
@@ -89,6 +101,7 @@ def _song(
             for s in analysis.sections
         ],
         "beats": [_r(b, 3) for b in analysis.beats if start - 1e-6 <= b <= end + 1e-6],
+        "accents": [[_r(b, 3), _r(s)] for b, s in strong_accents(analysis, start, end)],
         "lyrics": [
             {"start": _r(p.start), "end": _r(p.end), **p.texts}
             for p in pair(analysis.lyrics)
@@ -180,6 +193,17 @@ def build_context(
             "each_shot_once": True,
             "voices": "inside song gaps (no sung lyrics) unless force; never from dropped shots;"
             f" the song ducks {DUCK_DB:g} dB under each",
+            "fx": {
+                "kinds": list(FX_KINDS),
+                "flash": {
+                    "frames": FLASH_FRAMES,
+                    "range": list(FLASH_FRAME_RANGE),
+                    "strength": FLASH_STRENGTH,
+                },
+                "punch": {"zoom": PUNCH_ZOOM, "on": "a song.accents beat or the slot's accent"},
+                "drift": {"zoom": DRIFT_ZOOM},
+                "zoom_range": list(ZOOM_RANGE),
+            },
         },
         "legend": {
             "presence": "share of the shot's sampled frames the character is in",
@@ -189,6 +213,11 @@ def build_context(
             "motion": "still: hardly moves (drift suits it); moving: share of frames that move;"
             " onsets: [episode second, share of pixels changed] where movement starts, which"
             " refine lands on the cut or a slot's accent",
+            "accents": f"[song second, 0-1] of the beats that hit hardest (>= {STRONG_ACCENT}):"
+            " where a punch may land, and a slot's accent for motion to land on",
+            "fx": "per slot: flash (white after the cut, for a chorus entry or a hard"
+            " downbeat), punch (a push-in on an accent), drift (a slow push-in on a still"
+            " shot); refine aims zooms at her face",
             "voice_lines": "lines a voice may come from (subtitle times; refine trims to the"
             " voice); speakers are unknown, on_screen says who is seen while it is said",
         },

@@ -1,21 +1,26 @@
-"""Rendering a plan: each clip on its own with NVDEC and NVENC, cached by its parameters,
-then joined and laid over the mixed sound (the song with the plan's lines over it).
+"""Rendering a plan: each clip on its own with NVDEC and NVENC, cached by its parameters
+(effects included), then joined and laid over the mixed sound (the song with the plan's lines
+over it).
 
 Changing one clip in the plan re-renders only that clip. Previews are small and fast; the
-final render is 1080p.
+final render is 1080p. A clip without effects stays on the GPU from decoding to encoding; one
+with effects is built as `mad/fx.py` describes.
 """
 
 import hashlib
 import json
 from collections.abc import Sequence
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 
 from tokimeki.library.paths import SeriesPaths
+from tokimeki.mad.fx import ClipFx, clip_fx, flash_source, zoom_filter
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
 from tokimeki.mad.song.analysis import SongAnalysis
 from tokimeki.media.audio import decode_audio, encode_audio
+from tokimeki.models import CPU_THREADS
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.render.mix import DUCK_DB, RATE, VoiceClip, mix
 from tokimeki.render.video import RenderSettings, burn_subtitles, ffmpeg
@@ -30,9 +35,16 @@ def slot_frames(plan: Plan, slot: SlotPlan) -> int:
     return round((slot.end - plan.start) * fps) - round((slot.start - plan.start) * fps)
 
 
-def clip_key(source: Path, clip: SlotPlan, frames: int, settings: RenderSettings, fps: str) -> str:
+def clip_key(
+    source: Path,
+    clip: SlotPlan,
+    frames: int,
+    settings: RenderSettings,
+    fps: str,
+    fx: ClipFx | None = None,
+) -> str:
     stat = source.stat()
-    data = {
+    data: dict[str, object] = {
         "version": RENDER_VERSION,
         "source": str(source),
         "size": stat.st_size,
@@ -43,38 +55,90 @@ def clip_key(source: Path, clip: SlotPlan, frames: int, settings: RenderSettings
         "fps": fps,
         "settings": [settings.width, settings.height, settings.quality, settings.preset],
     }
+    if fx is not None:
+        data["fx"] = fx.key()
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:24]
 
 
+def _encode(settings: RenderSettings) -> list[str]:
+    return [
+        "-c:v", "h264_nvenc", "-preset", settings.preset, "-rc", "vbr",
+        "-cq", str(settings.quality), "-b:v", "0", "-g", "48", "-bf", "0",
+        "-video_track_timescale", "24000",
+    ]  # fmt: skip
+
+
+def _fx_graph(fx: ClipFx, speed: float, frames: int, settings: RenderSettings, fps: str) -> str:
+    """The clip's filter graph with effects: scaled on the GPU, zoomed on the CPU, flashed on
+    the GPU again."""
+    graph = (
+        f"[0:v]scale_cuda=w={settings.width}:h={settings.height}:interp_algo=lanczos"
+        f":format=yuv420p,setpts=(PTS-STARTPTS)/{speed:.6f},fps={fps}"
+    )
+    zoom = zoom_filter(fx, frames, Fraction(fps))
+    flash = flash_source(fx, settings.width, settings.height, fps)
+    if zoom is not None:
+        graph += f",hwdownload,format=yuv420p,{zoom}"
+        if flash is not None:
+            graph += ",hwupload_cuda"
+    if flash is None:
+        return f"{graph}[out]"
+    overlay = "overlay_cuda=eof_action=pass:repeatlast=0"
+    return f"{graph}[main];{flash}[white];[main][white]{overlay}[out]"
+
+
 def render_clip(
-    source: Path, clip: SlotPlan, frames: int, settings: RenderSettings, fps: str, out: Path
+    source: Path,
+    clip: SlotPlan,
+    frames: int,
+    settings: RenderSettings,
+    fps: str,
+    out: Path,
+    fx: ClipFx | None = None,
 ) -> None:
     speed = clip.derived_speed
     if clip.source_in is None or speed is None:
         raise ValueError(f"the slot at {clip.start:.3f}s has no window; refine the plan")
-    chain = ",".join(
-        [
-            f"scale_cuda=w={settings.width}:h={settings.height}:interp_algo=lanczos:format=nv12",
-            f"setpts=(PTS-STARTPTS)/{speed:.6f}",
-            f"fps={fps}",
-        ]
-    )
     out.parent.mkdir(parents=True, exist_ok=True)
     partial = out.with_suffix(".part.mp4")
-    ffmpeg(
-        [
-            "-threads", "1", "-filter_threads", "1",
-            "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-            "-ss", f"{clip.source_in:.6f}", "-i", str(source),
-            "-map", "0:v:0", "-an", "-sn", "-dn", "-map_chapters", "-1", "-map_metadata", "-1",
-            "-vf", chain, "-frames:v", str(frames),
-            "-c:v", "h264_nvenc", "-preset", settings.preset, "-rc", "vbr",
-            "-cq", str(settings.quality), "-b:v", "0", "-g", "48", "-bf", "0",
-            "-video_track_timescale", "24000",
-            str(partial),
-        ],
-        f"rendering the slot at {clip.start:.3f}s",
-    )  # fmt: skip
+    what = f"rendering the slot at {clip.start:.3f}s"
+    clean = ["-an", "-sn", "-dn", "-map_chapters", "-1", "-map_metadata", "-1"]
+    if fx is None:
+        chain = ",".join(
+            [
+                f"scale_cuda=w={settings.width}:h={settings.height}:interp_algo=lanczos:format=nv12",
+                f"setpts=(PTS-STARTPTS)/{speed:.6f}",
+                f"fps={fps}",
+            ]
+        )
+        ffmpeg(
+            [
+                "-threads", "1", "-filter_threads", "1",
+                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                "-ss", f"{clip.source_in:.6f}", "-i", str(source),
+                "-map", "0:v:0", *clean, "-vf", chain, "-frames:v", str(frames),
+                *_encode(settings), str(partial),
+            ],
+            what,
+        )  # fmt: skip
+        partial.replace(out)
+        return
+    script = out.with_suffix(".filter.txt")
+    script.write_text(_fx_graph(fx, speed, frames, settings, fps), encoding="utf-8")
+    try:
+        ffmpeg(
+            [
+                "-threads", "1", "-filter_complex_threads", str(CPU_THREADS),
+                "-init_hw_device", "cuda=gpu", "-filter_hw_device", "gpu",
+                "-hwaccel", "cuda", "-hwaccel_device", "gpu", "-hwaccel_output_format", "cuda",
+                "-ss", f"{clip.source_in:.6f}", "-i", str(source),
+                "-/filter_complex", str(script), "-map", "[out]", *clean,
+                "-frames:v", str(frames), *_encode(settings), str(partial),
+            ],
+            what,
+        )  # fmt: skip
+    finally:
+        script.unlink(missing_ok=True)
     partial.replace(out)
 
 
@@ -131,9 +195,10 @@ def render(
             raise ValueError(f"the slot at {slot.start:.3f}s has no shot")
         source = paths.episode_file(episodes[slot.shot])
         frames = slot_frames(plan, slot)
-        path = clips_dir / f"{clip_key(source, slot, frames, settings, fps)}.mp4"
+        fx = clip_fx(plan, slot)
+        path = clips_dir / f"{clip_key(source, slot, frames, settings, fps, fx)}.mp4"
         if not path.exists():
-            render_clip(source, slot, frames, settings, fps, path)
+            render_clip(source, slot, frames, settings, fps, path, fx)
         rendered.append(path)
     out_dir.mkdir(parents=True, exist_ok=True)
     listing = out_dir / f"{settings.label}.concat.txt"

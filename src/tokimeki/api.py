@@ -22,6 +22,7 @@ from tokimeki.library.shots import get_shot
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
 from tokimeki.mad.context import build_context
+from tokimeki.mad.fx import suggest
 from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import (
     PLAN_JSON_SCHEMA,
@@ -289,12 +290,15 @@ def plan_auto(
     max_slots: int | None = None,
     beats: Mapping[str, int] | None = None,
     voices: bool = True,
+    fx: bool = True,
 ) -> Json:
     """A complete draft plan from the heuristic arranger, refined and written to disk.
 
     `span` picks the excerpt (song seconds, snapped to bar lines); `max_slots` caps the cuts,
     so that only the best shots are needed; `beats` fixes beats per slot for section kinds.
     With `voices`, one of her lines goes into the intro gap if one fits (else the longest).
+    With `fx`, chorus entries and hard chorus downbeats flash, still shots drift and the
+    strongest accents inside a slot punch in.
     """
     ctx = _series(series)
     analysis = _analysis(song)
@@ -313,7 +317,12 @@ def plan_auto(
         raise ApiError(f"{len(slots)} slots but only {len(candidates)} shots; pick a shorter range")
     plan = draft(name, str(ctx.paths.root), character, analysis.id, slots, candidates)
     by_id = {c.shot.id: c for c in candidates}
-    refined, notes = refine(plan, analysis, by_id, _motion(ctx, candidates))
+    moves = _motion(ctx, candidates)
+    refined, notes = refine(plan, analysis, by_id, moves)
+    if fx:
+        refined, added = suggest(refined, analysis, moves)
+        refined, filled = refine(refined, analysis, by_id, moves)
+        notes += added + filled
     if voices:
         picked = _draft_voice(ctx, refined, analysis, chosen, character)
         if picked is not None:
