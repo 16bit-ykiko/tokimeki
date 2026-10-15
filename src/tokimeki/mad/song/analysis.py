@@ -5,7 +5,8 @@ A song is an audio file (a track of a `.cue` image is a convenience). The vocal 
 places the intro, the sung sections and the outro, comes from the mix itself by vocal
 separation (MDX-Net on the GPU); an LRC lyrics file or an instrumental version, when given,
 are used instead. Analyses live in a song store shared by every series
-(`$TOKIMEKI_HOME/songs`, by default `~/.local/share/tokimeki/songs`), one per song id.
+(`$TOKIMEKI_HOME/songs`, by default `~/.local/share/tokimeki/songs`), one per song id, with
+the media's paths relative to the data root when they are under it.
 """
 
 import hashlib
@@ -22,6 +23,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.library.paths import resolve_stored, stored_path, stored_paths
 from tokimeki.mad.song import bounds, structure
 from tokimeki.mad.song.accents import RATE as ACCENT_RATE
 from tokimeki.mad.song.accents import accent_strengths
@@ -37,7 +39,9 @@ from tokimeki.models.separation import MODEL_FILE as SEPARATION_MODEL
 from tokimeki.models.separation import SAMPLE_RATE as SEPARATION_RATE
 from tokimeki.models.separation import VocalSeparator
 
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3
+READABLE_VERSIONS = (2, ANALYSIS_VERSION)
+"""Version 2 stored absolute paths."""
 UNLIMITED = 1_000_000
 BOUNDS_RATE = 16000
 
@@ -86,22 +90,23 @@ class SongAnalysis:
 
     def to_json(self) -> str:
         data = asdict(self)
-        data["source"]["path"] = str(self.source.path)
+        data["source"]["path"] = stored_path(self.source.path.absolute())
         data["version"] = ANALYSIS_VERSION
         return json.dumps(data, ensure_ascii=False, indent=1)
 
     @staticmethod
     def from_json(text: str) -> "SongAnalysis":
         d = cast(Json, json.loads(text))
-        if d.get("version") != ANALYSIS_VERSION:
+        if d.get("version") not in READABLE_VERSIONS:
             raise SongError("the stored analysis is from another version")
+        inputs = cast(dict[str, str], d.get("inputs", {}))
         src = cast(Json, d["source"])
         excerpt = cast(list[float], d["excerpt"])
         return SongAnalysis(
             id=str(d["id"]),
             title=str(d["title"]),
             source=SongSource(
-                Path(str(src["path"])),
+                resolve_stored(str(src["path"])),
                 _float(src["offset"]),
                 _float(src["duration"]),
                 str(src["title"]),
@@ -118,7 +123,7 @@ class SongAnalysis:
             lyrics=[_lyric(cast(Json, x)) for x in cast(list[object], d["lyrics"])],
             excerpt=(float(excerpt[0]), float(excerpt[1])),
             slots=[_slot(cast(Json, x)) for x in cast(list[object], d["slots"])],
-            inputs=cast(dict[str, str], d.get("inputs", {})),
+            inputs={k: stored_paths(v) for k, v in inputs.items()},
             accents=cast(list[float] | None, d.get("accents")),
         )
 
@@ -441,7 +446,9 @@ def analyse_song(
         backing = resolve(path, instrumental_track)
     inputs = {
         "lyrics": " ".join(x.key() for x in lyrics),
-        "instrumental": f"{backing.path.resolve()}|{backing.offset:.3f}" if backing else "",
+        "instrumental": (
+            f"{stored_path(backing.path.resolve())}|{backing.offset:.3f}" if backing else ""
+        ),
         "separation": SEPARATION_MODEL,
     }
     lines = [

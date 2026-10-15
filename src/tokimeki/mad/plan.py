@@ -4,6 +4,10 @@ One entry per slot of the song: which shot fills it, the source window (`in`/`ou
 seconds) and why; and the original lines laid over the song (`voices`). Rendering only reads
 the plan. `in`/`out`/`speed` may be left out; `tokimeki plan refine` (or render) fills them
 around the shot's expression peak, and a voice's from its subtitle line.
+
+The series is stored relative to the data root (`library.paths.data_root`) when it is under
+it, and episodes relative to the series, so the tree can move; in memory `series` is the
+absolute path. Plans before `tokimeki.plan/4` stored it absolute and still read.
 """
 
 import json
@@ -12,8 +16,10 @@ from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
-PLAN_SCHEMA = "tokimeki.plan/3"
-READABLE_SCHEMAS = ("tokimeki.plan/2", PLAN_SCHEMA)
+from tokimeki.library.paths import resolve_stored, stored_path
+
+PLAN_SCHEMA = "tokimeki.plan/4"
+READABLE_SCHEMAS = ("tokimeki.plan/2", "tokimeki.plan/3", PLAN_SCHEMA)
 MIN_SPEED = 0.9
 MAX_SPEED = 1.1
 DEFAULT_FPS = "24000/1001"
@@ -199,7 +205,7 @@ class Plan:
         return {
             "schema": PLAN_SCHEMA,
             "name": self.name,
-            "series": self.series,
+            "series": stored_path(Path(self.series)) if self.series else "",
             "character": self.character,
             "song": self.song,
             "fps": self.fps,
@@ -289,9 +295,10 @@ class Plan:
 
         if d.get("schema", PLAN_SCHEMA) not in READABLE_SCHEMAS:
             problems.append(f"schema: expected one of {', '.join(READABLE_SCHEMAS)}")
+        series = text(d, "series", "")
         plan = Plan(
             name=text(d, "name", ""),
-            series=text(d, "series", ""),
+            series=str(resolve_stored(series)) if series else "",
             character=text(d, "character", ""),
             song=text(d, "song", ""),
             fps=text(d, "fps", "", DEFAULT_FPS),
@@ -392,7 +399,11 @@ PLAN_JSON_SCHEMA: Json = {
     "properties": {
         "schema": {"const": PLAN_SCHEMA},
         "name": {"type": "string", "description": "Outputs go to <series>/.tokimeki/mads/<name>/."},
-        "series": {"type": "string", "description": "The series directory (absolute path)."},
+        "series": {
+            "type": "string",
+            "description": "The series directory: relative to the data root ($TOKIMEKI_DATA,"
+            " default ~/anime), or absolute.",
+        },
         "character": {"type": "string", "description": "Named cast cluster featured, e.g. 梦梦."},
         "song": {"type": "string", "description": "Song id from `tokimeki song analyze`."},
         "fps": {"type": "string", "default": DEFAULT_FPS, "description": "Output frame rate."},
@@ -436,7 +447,8 @@ PLAN_JSON_SCHEMA: Json = {
                     },
                     "episode": {
                         "type": "string",
-                        "description": "Informational: the shot's episode.",
+                        "description": "Informational: the shot's episode, its path relative"
+                        " to the series.",
                     },
                     "sync": {
                         "type": "boolean",
@@ -517,7 +529,8 @@ PLAN_JSON_SCHEMA: Json = {
                     },
                     "episode": {
                         "type": "string",
-                        "description": "The episode, when giving in/out without a line.",
+                        "description": "The episode (its path relative to the series), when"
+                        " giving in/out without a line.",
                     },
                     "in": {
                         "type": "number",

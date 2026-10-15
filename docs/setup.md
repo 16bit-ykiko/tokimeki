@@ -43,4 +43,5 @@ pixi run test                 # GPU tests are skipped where there is no GPU
       voice/page/                     # the speakers' listening page and its clips (never shared)
   ```
 - Song analyses are shared by every series: `$TOKIMEKI_HOME/songs/<id>/analysis.json` (default `~/.local/share/tokimeki/songs`).
+- Series live under one data root, `$TOKIMEKI_DATA` (default `~/anime`). Plans store their series and song analyses their media relative to it (episodes relative to the series, songs by id), so moving the whole tree only needs `TOKIMEKI_DATA` set to the new place; paths outside it stay absolute. Files written before (plan schema 2–3, analysis version 2) hold absolute paths and still read.
 - Keep media on the WSL filesystem, not `/mnt/c`: reading through the Windows mount is slow.

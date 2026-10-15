@@ -96,7 +96,7 @@ def test_plan_parse_reports_every_problem_by_path() -> None:
         "slots[0].start: expected a number",
         "slots[1]: expected an object",
     ]
-    plan = Plan("p", "s", "梦梦", "x", [SlotPlan(0.0, 1.0, 3, "why", 10.0, 11.0, 1.0)])
+    plan = Plan("p", "/s", "梦梦", "x", [SlotPlan(0.0, 1.0, 3, "why", 10.0, 11.0, 1.0)])
     assert Plan.from_json(plan.to_json()) == plan
     assert "slots" in json.dumps(PLAN_JSON_SCHEMA)
 
@@ -186,7 +186,7 @@ def test_plan_2_files_still_read_and_voices_round_trip() -> None:
     plan = Plan("n", "/s", "c", "x", [SlotPlan(0.0, 1.0, 3)])
     plan.voices.append(VoicePlan(0.5, line=7, gain=-2.0, force=True, why="w"))
     again = Plan.from_json(plan.to_json())
-    assert again.voices == plan.voices and again.to_dict()["schema"] == "tokimeki.plan/3"
+    assert again.voices == plan.voices and again.to_dict()["schema"] == "tokimeki.plan/4"
     with pytest.raises(PlanFormatError, match=r"voices\[0\]\.sub"):
         Plan.from_dict({**old, "voices": [{"at": 0, "line": 1, "sub": "yes"}]})
 

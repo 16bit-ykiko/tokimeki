@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from tokimeki.library.paths import stored_path
 from tokimeki.media.subtitles import read_ass
 
 _STAMP = re.compile(r"\[(\d+):(\d{1,2}(?:[.:]\d{1,3})?)\]")
@@ -48,7 +49,8 @@ class LyricSource:
 
     def key(self) -> str:
         stamp = self.path.stat().st_mtime_ns if self.path.exists() else 0
-        return f"{self.path.resolve()}@{stamp}#{','.join(self.styles)}@{self.lang}"
+        where = stored_path(self.path.resolve())
+        return f"{where}@{stamp}#{','.join(self.styles)}@{self.lang}"
 
 
 def _seconds(minutes: str, seconds: str) -> float:

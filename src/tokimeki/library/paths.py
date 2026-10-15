@@ -1,8 +1,38 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 VIDEO_SUFFIXES = frozenset({".mkv", ".mp4", ".m2ts", ".ts", ".webm", ".avi"})
 DATA_DIR_NAME = ".tokimeki"
+DATA_ROOT_ENV = "TOKIMEKI_DATA"
+
+
+def data_root() -> Path:
+    """Where the series live: `$TOKIMEKI_DATA`, by default `~/anime`."""
+    value = os.environ.get(DATA_ROOT_ENV)
+    return (Path(value).expanduser() if value else Path.home() / "anime").resolve()
+
+
+def stored_path(path: Path) -> str:
+    """A path as plans and song analyses keep it: relative to the data root when it is under
+    it, so the whole tree can move; absolute otherwise."""
+    if not path.is_absolute():
+        return path.as_posix()
+    full = path.resolve()
+    root = data_root()
+    return full.relative_to(root).as_posix() if full.is_relative_to(root) else str(path)
+
+
+def stored_paths(text: str) -> str:
+    """Text written before paths were stored relative (an analysis's input keys), with the
+    data root taken off the paths in it."""
+    return text.replace(f"{data_root()}/", "")
+
+
+def resolve_stored(text: str) -> Path:
+    """The path a stored one means: relative ones are under the data root."""
+    path = Path(text).expanduser()
+    return path if path.is_absolute() else data_root() / path
 
 
 @dataclass(frozen=True)
