@@ -12,7 +12,7 @@ from itertools import groupby
 from tokimeki.mad.candidates import Candidate
 from tokimeki.mad.plan import MIN_SPEED, Plan, SlotPlan
 from tokimeki.mad.refine import usable
-from tokimeki.song.slots import Slot
+from tokimeki.mad.song.slots import Slot
 
 SMILES = {"smile": 1.0, ":d": 0.9, "^_^": 0.9, "laughing": 0.8, "grin": 0.5}
 

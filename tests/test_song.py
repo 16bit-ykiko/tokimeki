@@ -5,6 +5,21 @@ import numpy as np
 import pytest
 import torch
 
+from tokimeki.mad.song import accents
+from tokimeki.mad.song.analysis import SongSource, assemble, lyrics_share, refrain_bars, song_id
+from tokimeki.mad.song.bounds import song_bounds
+from tokimeki.mad.song.lyrics import LyricLine, LyricSource, pair, parse_lrc, read_lyrics
+from tokimeki.mad.song.slots import Excerpt, first_chorus, make_slots
+from tokimeki.mad.song.structure import (
+    Section,
+    bar_grid,
+    best_lag,
+    boundaries,
+    label_sections,
+    merge_runs,
+    novelty,
+    vocal_share,
+)
 from tokimeki.media.cue import cue_time, parse_cue
 from tokimeki.models.beats import (
     Beats,
@@ -16,21 +31,6 @@ from tokimeki.models.beats import (
 )
 from tokimeki.models.separation import CHUNK, N_FFT, VocalSeparator, band_mask, mdx_input
 from tokimeki.models.separation import FPS as SEPARATION_FPS
-from tokimeki.song import accents
-from tokimeki.song.analysis import SongSource, assemble, lyrics_share, refrain_bars, song_id
-from tokimeki.song.bounds import song_bounds
-from tokimeki.song.lyrics import LyricLine, LyricSource, pair, parse_lrc, read_lyrics
-from tokimeki.song.slots import Excerpt, first_chorus, make_slots
-from tokimeki.song.structure import (
-    Section,
-    bar_grid,
-    best_lag,
-    boundaries,
-    label_sections,
-    merge_runs,
-    novelty,
-    vocal_share,
-)
 
 CUE = """﻿REM GENRE Anime
 PERFORMER "Momo"

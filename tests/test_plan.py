@@ -19,10 +19,10 @@ from tokimeki.mad.arrange import arrange, fits
 from tokimeki.mad.candidates import Candidate, FramePoint, cuteness
 from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, SlotPlan, VoicePlan
 from tokimeki.mad.refine import frame_ceil, frame_floor, refine, window
-from tokimeki.song.analysis import SongAnalysis, SongSource, save_analysis, slots_over
-from tokimeki.song.lyrics import LyricLine
-from tokimeki.song.slots import Slot
-from tokimeki.song.structure import Section
+from tokimeki.mad.song.analysis import SongAnalysis, SongSource, save_analysis, slots_over
+from tokimeki.mad.song.lyrics import LyricLine
+from tokimeki.mad.song.slots import Slot
+from tokimeki.mad.song.structure import Section
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)
 

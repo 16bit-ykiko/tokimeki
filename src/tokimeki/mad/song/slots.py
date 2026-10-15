@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import pairwise
 
-from tokimeki.song.structure import Section
+from tokimeki.mad.song.structure import Section
 
 MIN_EXCERPT = 45.0
 MAX_EXCERPT = 90.0

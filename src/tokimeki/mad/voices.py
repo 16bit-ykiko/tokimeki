@@ -16,8 +16,8 @@ from tokimeki.library.records import Episode, Line, LineKind, ShotStatus
 from tokimeki.library.series import Context
 from tokimeki.library.shots import kept_ranges, list_shots
 from tokimeki.mad.plan import Plan, VoicePlan
-from tokimeki.song.analysis import SongAnalysis
-from tokimeki.song.gaps import Gap, gaps
+from tokimeki.mad.song.analysis import SongAnalysis
+from tokimeki.mad.song.gaps import Gap, gaps
 
 MAX_VOICE = 8.0
 GAP_MARGIN = 0.3

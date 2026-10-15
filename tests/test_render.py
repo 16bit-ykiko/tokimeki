@@ -19,11 +19,11 @@ from tokimeki.library.series import open_series
 from tokimeki.mad.fonts import Fonts
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
 from tokimeki.mad.render import clip_key, slot_frames
+from tokimeki.mad.song.analysis import SongSource, save_analysis
+from tokimeki.mad.song.lyrics import LyricLine, pair
 from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.video import PREVIEW, RenderSettings
 from tokimeki.models.timeline import TimelineClip, write_timeline
-from tokimeki.song.analysis import SongSource, save_analysis
-from tokimeki.song.lyrics import LyricLine, pair
 
 
 def _plan(bounds: list[float]) -> Plan:

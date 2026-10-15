@@ -15,11 +15,11 @@ from tokimeki.mad.mix import DUCK_DB
 from tokimeki.mad.motion import ShotMotion, motions
 from tokimeki.mad.plan import DEFAULT_FPS, MAX_SPEED, MIN_SPEED
 from tokimeki.mad.refine import EDGE_FRAMES
+from tokimeki.mad.song.analysis import SongAnalysis, slots_over
+from tokimeki.mad.song.gaps import gaps, quiet_bars
+from tokimeki.mad.song.lyrics import pair
 from tokimeki.mad.validate import BEAT_TOLERANCE, MIN_SLOT
 from tokimeki.mad.voices import usable_lines
-from tokimeki.song.analysis import SongAnalysis, slots_over
-from tokimeki.song.gaps import gaps, quiet_bars
-from tokimeki.song.lyrics import pair
 
 type Json = dict[str, object]
 

@@ -35,12 +35,7 @@ from tokimeki.mad.plan import (
 from tokimeki.mad.refine import refine
 from tokimeki.mad.render import export_timeline, render, render_audio
 from tokimeki.mad.report import write_report
-from tokimeki.mad.subtitles import write_subtitles
-from tokimeki.mad.validate import Issue, validate
-from tokimeki.mad.video import FINAL, PREVIEW
-from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines
-from tokimeki.media.audio import AudioError
-from tokimeki.song.analysis import (
+from tokimeki.mad.song.analysis import (
     SongAnalysis,
     SongError,
     analyse_song,
@@ -48,7 +43,12 @@ from tokimeki.song.analysis import (
     slots_over,
     with_accents,
 )
-from tokimeki.song.lyrics import LyricSource, pair
+from tokimeki.mad.song.lyrics import LyricSource, pair
+from tokimeki.mad.subtitles import write_subtitles
+from tokimeki.mad.validate import Issue, validate
+from tokimeki.mad.video import FINAL, PREVIEW
+from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines
+from tokimeki.media.audio import AudioError
 from tokimeki.voice.page import write_page
 from tokimeki.voice.paths import page_dir
 from tokimeki.voice.review import review, write_clips

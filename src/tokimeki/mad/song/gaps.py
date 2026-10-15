@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from tokimeki.song.analysis import SUNG, SongAnalysis
-from tokimeki.song.structure import VOCAL_ON
+from tokimeki.mad.song.analysis import SUNG, SongAnalysis
+from tokimeki.mad.song.structure import VOCAL_ON
 
 MIN_GAP = 0.8
 JOIN = 0.05

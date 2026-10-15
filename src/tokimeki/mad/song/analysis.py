@@ -22,6 +22,12 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.mad.song import bounds, structure
+from tokimeki.mad.song.accents import RATE as ACCENT_RATE
+from tokimeki.mad.song.accents import accent_strengths
+from tokimeki.mad.song.lyrics import LyricLine, LyricSource, read_lyrics
+from tokimeki.mad.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
+from tokimeki.mad.song.structure import Section
 from tokimeki.media.audio import audio_streams, decode_audio, main_audio
 from tokimeki.media.cue import read_cue
 from tokimeki.models.beats import FPS, SAMPLE_RATE, Beats, BeatTracker, mel_centres
@@ -30,12 +36,6 @@ from tokimeki.models.separation import FPS as SEPARATION_FPS
 from tokimeki.models.separation import MODEL_FILE as SEPARATION_MODEL
 from tokimeki.models.separation import SAMPLE_RATE as SEPARATION_RATE
 from tokimeki.models.separation import VocalSeparator
-from tokimeki.song import bounds, structure
-from tokimeki.song.accents import RATE as ACCENT_RATE
-from tokimeki.song.accents import accent_strengths
-from tokimeki.song.lyrics import LyricLine, LyricSource, read_lyrics
-from tokimeki.song.slots import Excerpt, Slot, excerpt_between, first_chorus, make_slots
-from tokimeki.song.structure import Section
 
 ANALYSIS_VERSION = 2
 UNLIMITED = 1_000_000

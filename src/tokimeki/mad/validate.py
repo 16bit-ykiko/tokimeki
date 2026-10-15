@@ -15,9 +15,9 @@ from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus
 from tokimeki.library.shots import get_shot, kept_ranges
 from tokimeki.mad.plan import MAX_SPEED, MIN_SPEED, Plan, VoicePlan
 from tokimeki.mad.refine import beat_grid, edge, nearest
+from tokimeki.mad.song.analysis import SongAnalysis
+from tokimeki.mad.song.gaps import sung_overlap
 from tokimeki.mad.voices import MAX_VOICE, covered
-from tokimeki.song.analysis import SongAnalysis
-from tokimeki.song.gaps import sung_overlap
 
 BEAT_TOLERANCE = 1 / 48
 """Half a frame at 24 fps: how far a slot boundary may sit from a beat."""

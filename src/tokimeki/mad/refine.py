@@ -18,7 +18,7 @@ from fractions import Fraction
 from tokimeki.mad.candidates import Candidate
 from tokimeki.mad.motion import Onset, ShotMotion
 from tokimeki.mad.plan import MAX_SPEED, MIN_SPEED, Plan, SlotPlan
-from tokimeki.song.analysis import SongAnalysis
+from tokimeki.mad.song.analysis import SongAnalysis
 
 EDGE_FRAMES = 2
 """Frames kept off each end of a shot, where transitions and stray frames sit."""

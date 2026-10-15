@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from tokimeki.mad.fonts import Fonts
-from tokimeki.song.lyrics import LyricPair
+from tokimeki.mad.song.lyrics import LyricPair
 
 WIDTH, HEIGHT = 1920, 1080
 FILL = "&H00FFFFFF"
