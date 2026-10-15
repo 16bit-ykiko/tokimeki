@@ -5,6 +5,7 @@ FLAC and is silent outside kept shots, so a line from a dropped shot cannot be u
 """
 
 import logging
+from bisect import bisect_left
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from numpy.typing import NDArray
 
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
-from tokimeki.library.records import Episode
+from tokimeki.library.records import Episode, Line
 from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio, encode_audio, main_audio
 from tokimeki.models.gpu import loaded
@@ -23,6 +24,14 @@ from tokimeki.stages.base import Context
 
 NAME = "voice"
 EDGE_RAMP = 0.01
+TRIM_SEARCH = 0.3
+"""Seconds searched for the voice beyond the line's subtitle times."""
+TRIM_FLOOR = 30.0
+"""dB below the loudest 10 ms of the line that still count as voice."""
+TRIM_LEAD, TRIM_TAIL = 0.06, 0.12
+TRIM_RATE = 16000
+PAUSE = 0.06
+"""Shorter silences inside a line do not split it."""
 
 log = logging.getLogger("tokimeki")
 
@@ -73,3 +82,75 @@ def reset(ctx: Context, episode: Episode) -> None:
     stem_path(ctx.paths, episode.id).unlink(missing_ok=True)
     with transaction(ctx.conn):
         clear_stage(ctx.conn, episode.id, NAME)
+
+
+def search_window(
+    line: Line, neighbours: Sequence[Line], kept: Sequence[tuple[float, float]]
+) -> tuple[float, float] | None:
+    """Where to look for the line's voice: its subtitle times widened by `TRIM_SEARCH`, never
+    into the previous or next of `neighbours` (the episode's dialogue, by start) nor out of
+    the kept range it starts in; None when it starts outside kept shots."""
+    starts = [x.start for x in neighbours]
+    i = bisect_left(starts, line.start)
+    before = max((x.end for x in neighbours[:i] if x.id != line.id), default=0.0)
+    after = min((x.start for x in neighbours[i:] if x.id != line.id), default=float("inf"))
+    room = next(((a, b) for a, b in kept if a <= line.start < b), None)
+    if room is None:
+        return None
+    lo = max(line.start - TRIM_SEARCH, min(before, line.start), room[0])
+    hi = min(line.end + TRIM_SEARCH, max(after, line.end), room[1])
+    return lo, hi
+
+
+def heard(
+    samples: NDArray[np.float32], rate: int, window: tuple[float, float], line: Line
+) -> tuple[float, float] | None:
+    """Episode seconds of the line's voice in `samples`, the stem over `window`; None when
+    it is silent there."""
+    lo, hi = window
+    found = voiced(samples, rate, (line.start - lo, line.end - lo))
+    if found is None:
+        return None
+    a, b = found
+    return max(lo, lo + a - TRIM_LEAD), min(hi, lo + b + TRIM_TAIL)
+
+
+def voice_bounds(
+    ctx: Context, episode: Episode, line: Line, neighbours: list[Line]
+) -> tuple[float, float]:
+    """Where the line's voice is in the stem (`search_window` trimmed to the voice); the
+    subtitle times when the stem is silent there or not separated yet."""
+    path = stem_path(ctx.paths, episode.id)
+    window = search_window(line, neighbours, kept_ranges(ctx.conn, episode))
+    if not path.exists() or window is None:
+        return line.start, line.end
+    lo, hi = window
+    samples = decode_audio(path, TRIM_RATE, start=lo, duration=hi - lo)
+    return heard(samples, TRIM_RATE, window, line) or (line.start, line.end)
+
+
+def voiced(
+    samples: NDArray[np.float32], rate: int, core: tuple[float, float] | None = None
+) -> tuple[float, float] | None:
+    """Start and end (seconds) of the voice: runs of 10 ms frames within `TRIM_FLOOR` dB of
+    the loudest, pauses under `PAUSE` bridged, and of those only the runs that overlap
+    `core` (the subtitle's own times) when given."""
+    hop = rate // 100
+    frames = len(samples) // hop
+    if frames == 0:
+        return None
+    rms = np.sqrt((samples[: frames * hop].reshape(frames, hop).astype(np.float64) ** 2).mean(1))
+    db = 20 * np.log10(rms + 1e-9)
+    if db.max() < -60:
+        return None
+    loud = np.flatnonzero(db >= db.max() - TRIM_FLOOR)
+    runs: list[tuple[int, int]] = []
+    for i in loud:
+        if runs and i - runs[-1][1] <= round(PAUSE * 100):
+            runs[-1] = (runs[-1][0], int(i) + 1)
+        else:
+            runs.append((int(i), int(i) + 1))
+    if core is not None:
+        a, b = core[0] * 100, core[1] * 100
+        runs = [r for r in runs if r[0] < b and a < r[1]] or runs
+    return runs[0][0] * hop / rate, runs[-1][1] * hop / rate

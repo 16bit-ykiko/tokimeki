@@ -5,12 +5,8 @@ voice stem is silent elsewhere anyway. Speakers are unknown (the subtitles carry
 who is on screen while a line is said is listed for the arranger to judge.
 """
 
-from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-
-import numpy as np
-from numpy.typing import NDArray
 
 from tokimeki.library.cast import named_cast_by_shot
 from tokimeki.library.episodes import get_episode
@@ -18,21 +14,12 @@ from tokimeki.library.lines import get_line, list_lines, list_parts, shots_in_pa
 from tokimeki.library.records import Episode, Line, LineKind, ShotStatus
 from tokimeki.library.shots import kept_ranges, list_shots
 from tokimeki.mad.plan import Plan, VoicePlan
-from tokimeki.media.audio import decode_audio
 from tokimeki.song.analysis import SongAnalysis
 from tokimeki.song.gaps import Gap, gaps
 from tokimeki.stages.base import Context
-from tokimeki.stages.voice import stem_path
+from tokimeki.stages.voice import voice_bounds
 
 MAX_VOICE = 8.0
-TRIM_SEARCH = 0.3
-"""Seconds searched for the voice beyond the line's subtitle times."""
-TRIM_FLOOR = 30.0
-"""dB below the loudest 10 ms of the line that still count as voice."""
-TRIM_LEAD, TRIM_TAIL = 0.06, 0.12
-TRIM_RATE = 16000
-PAUSE = 0.06
-"""Shorter silences inside a line do not split it."""
 GAP_MARGIN = 0.3
 """Seconds kept free at each end of a gap the draft puts a line in."""
 
@@ -73,59 +60,6 @@ def usable_lines(ctx: Context, episode: Episode) -> list[VoiceLine]:
         names = sorted({name for shot in over for name, _ in cast.get(shot, [])})
         out.append(VoiceLine(line, episode, over, names))
     return out
-
-
-def voice_bounds(
-    ctx: Context, episode: Episode, line: Line, neighbours: list[Line]
-) -> tuple[float, float]:
-    """Where the line's voice is in the stem: its subtitle times widened by `TRIM_SEARCH`
-    (never into the next or previous line) and trimmed to the voice; the subtitle times when
-    the stem is silent or not separated yet."""
-    path = stem_path(ctx.paths, episode.id)
-    if not path.exists():
-        return line.start, line.end
-    starts = [x.start for x in neighbours]
-    i = bisect_left(starts, line.start)
-    before = max((x.end for x in neighbours[:i] if x.id != line.id), default=0.0)
-    after = min((x.start for x in neighbours[i:] if x.id != line.id), default=float("inf"))
-    room = next(((a, b) for a, b in kept_ranges(ctx.conn, episode) if a <= line.start < b), None)
-    if room is None:
-        return line.start, line.end
-    lo = max(line.start - TRIM_SEARCH, min(before, line.start), room[0])
-    hi = min(line.end + TRIM_SEARCH, max(after, line.end), room[1])
-    samples = decode_audio(path, TRIM_RATE, start=lo, duration=hi - lo)
-    found = voiced(samples, TRIM_RATE, (line.start - lo, line.end - lo))
-    if found is None:
-        return line.start, line.end
-    a, b = found
-    return max(lo, lo + a - TRIM_LEAD), min(hi, lo + b + TRIM_TAIL)
-
-
-def voiced(
-    samples: NDArray[np.float32], rate: int, core: tuple[float, float] | None = None
-) -> tuple[float, float] | None:
-    """Start and end (seconds) of the voice: runs of 10 ms frames within `TRIM_FLOOR` dB of
-    the loudest, pauses under `PAUSE` bridged, and of those only the runs that overlap
-    `core` (the subtitle's own times) when given."""
-    hop = rate // 100
-    frames = len(samples) // hop
-    if frames == 0:
-        return None
-    rms = np.sqrt((samples[: frames * hop].reshape(frames, hop).astype(np.float64) ** 2).mean(1))
-    db = 20 * np.log10(rms + 1e-9)
-    if db.max() < -60:
-        return None
-    loud = np.flatnonzero(db >= db.max() - TRIM_FLOOR)
-    runs: list[tuple[int, int]] = []
-    for i in loud:
-        if runs and i - runs[-1][1] <= round(PAUSE * 100):
-            runs[-1] = (runs[-1][0], int(i) + 1)
-        else:
-            runs.append((int(i), int(i) + 1))
-    if core is not None:
-        a, b = core[0] * 100, core[1] * 100
-        runs = [r for r in runs if r[0] < b and a < r[1]] or runs
-    return runs[0][0] * hop / rate, runs[-1][1] * hop / rate
 
 
 def refine_voices(ctx: Context, plan: Plan) -> tuple[list[VoicePlan], list[str]]:

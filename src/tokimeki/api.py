@@ -33,7 +33,7 @@ from tokimeki.mad.render import FINAL, PREVIEW, export_timeline, render, render_
 from tokimeki.mad.report import write_report
 from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.validate import Issue, validate
-from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines, voice_bounds
+from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines
 from tokimeki.media.audio import AudioError
 from tokimeki.song.analysis import (
     SongAnalysis,
@@ -46,6 +46,7 @@ from tokimeki.song.analysis import (
 from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages import motion, voice
 from tokimeki.stages.base import Context, open_series, register_episodes
+from tokimeki.stages.voice import voice_bounds
 
 type Json = dict[str, object]
 
