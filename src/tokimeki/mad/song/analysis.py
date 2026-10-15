@@ -462,7 +462,10 @@ def analyse_song(
     if analysis_path(sid).exists():
         try:
             stored = load_analysis(sid)
-            analysis = stored if stored.inputs == inputs and stored.source == source else None
+            same = replace(stored.source, path=stored.source.path.resolve()) == replace(
+                source, path=source.path.resolve()
+            )
+            analysis = stored if stored.inputs == inputs and same else None
         except SongError:
             analysis = None
     if analysis is None:
