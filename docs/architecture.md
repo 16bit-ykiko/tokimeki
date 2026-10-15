@@ -35,6 +35,24 @@ A MAD's clips are rendered in `mad/render.py`, not `render/`: each is cut from a
 
 Applied; `comic/`, `server/`, `clients/` and `web/` are not built yet. Shared packages are named by what they do, with no umbrella package; the product lines sit on top of them.
 
+Where the modules went, for porting branches made before the move (stage names, CLI commands and JSON are unchanged):
+
+| Old | New |
+|---|---|
+| `paths.py` | `library/paths.py` |
+| `stages/base.py`: `Context`, `open_series` | `library/series.py` |
+| `stages/base.py`: `register_episodes` | `anime/pipeline.py` |
+| `stages/cast.py`: detection and CCIP, `run`, `reset`, `head_box`, `NAME` | `anime/faces.py` |
+| `stages/cast.py`: clusters, `rename`, `merge`, `recluster`, `split`, `move`, `fixes`, `doubtful` | `cast/clusters.py` |
+| `stages/clustering.py` | `cast/clustering.py` |
+| `stages/voice.py` | `anime/stems.py` |
+| `stages/selfcheck.py` | `selfcheck.py` |
+| `stages/{content_filter,frames,lines,motion,pipeline,scenes,shots}.py` | `anime/` |
+| `report/` | `anime/report/` |
+| `song/` | `mad/song/` |
+| `mad/mix.py`, `mad/fonts.py` | `render/mix.py`, `render/fonts.py` |
+| `mad/render.py`: `RenderSettings`, `PREVIEW`, `FINAL`, `burn_subtitles`, `_ffmpeg` (now `ffmpeg`) | `render/video.py` |
+
 ```
 src/tokimeki/
   cast/      who each character is: face embeddings, names and aliases, per-shot fixes (anime and comic)
