@@ -7,36 +7,20 @@ final render is 1080p.
 
 import hashlib
 import json
-import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from tokimeki.mad.mix import DUCK_DB, RATE, VoiceClip, mix
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
+from tokimeki.mad.video import RenderSettings, burn_subtitles, ffmpeg
 from tokimeki.media.audio import decode_audio, encode_audio
-from tokimeki.media.decode import DecodeError
 from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.paths import SeriesPaths
 from tokimeki.song.analysis import SongAnalysis
 
 RENDER_VERSION = 1
-
-
-@dataclass(frozen=True, slots=True)
-class RenderSettings:
-    label: str
-    width: int
-    height: int
-    quality: int
-    """NVENC constant-quality level (lower is better)."""
-    preset: str
-
-
-PREVIEW = RenderSettings("preview", 640, 360, 28, "p4")
-FINAL = RenderSettings("final", 1920, 1080, 19, "p6")
 
 
 def slot_frames(plan: Plan, slot: SlotPlan) -> int:
@@ -62,16 +46,6 @@ def clip_key(source: Path, clip: SlotPlan, frames: int, settings: RenderSettings
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:24]
 
 
-def _ffmpeg(args: list[str], what: str) -> None:
-    result = subprocess.run(
-        ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", *args],
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise DecodeError(f"{what} failed:\n{result.stderr.decode(errors='replace').strip()}")
-
-
 def render_clip(
     source: Path, clip: SlotPlan, frames: int, settings: RenderSettings, fps: str, out: Path
 ) -> None:
@@ -87,7 +61,7 @@ def render_clip(
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     partial = out.with_suffix(".part.mp4")
-    _ffmpeg(
+    ffmpeg(
         [
             "-threads", "1", "-filter_threads", "1",
             "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
@@ -102,42 +76,6 @@ def render_clip(
         f"rendering the slot at {clip.start:.3f}s",
     )  # fmt: skip
     partial.replace(out)
-
-
-def _filter_path(path: Path) -> str:
-    """A path quoted for an ffmpeg filter argument."""
-    escaped = str(path).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-    return f"'{escaped}'"
-
-
-def burn_subtitles(
-    video: Path, subtitles: Path, fonts: Path, settings: RenderSettings, out: Path
-) -> None:
-    """Draw an ASS file onto a video: NVDEC in, libass on the CPU, NVENC out."""
-    chain = ",".join(
-        [
-            "hwdownload",
-            "format=nv12",
-            "format=yuv420p",
-            f"subtitles=filename={_filter_path(subtitles)}:fontsdir={_filter_path(fonts)}",
-            "format=nv12",
-            "hwupload_cuda",
-        ]
-    )
-    script = out.with_suffix(".filter.txt")
-    script.write_text(chain, encoding="utf-8")
-    _ffmpeg(
-        [
-            "-threads", "1", "-filter_threads", "1",
-            "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-i", str(video),
-            "-/vf", str(script), "-map_chapters", "-1",
-            "-c:v", "h264_nvenc", "-preset", settings.preset, "-rc", "vbr",
-            "-cq", str(settings.quality), "-b:v", "0", "-g", "48", "-bf", "0",
-            str(out),
-        ],
-        "burning in the subtitles",
-    )  # fmt: skip
-    script.unlink()
 
 
 def duration(plan: Plan) -> float:
@@ -201,13 +139,13 @@ def render(
     listing = out_dir / f"{settings.label}.concat.txt"
     listing.write_text("".join(f"file '{p}'\n" for p in rendered), encoding="utf-8")
     video = out_dir / f"{settings.label}.video.mp4"
-    _ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video)], "joining")
+    ffmpeg(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(video)], "joining")
     if subtitles is not None:
         subbed = out_dir / f"{settings.label}.subbed.mp4"
         burn_subtitles(video, subtitles[0], subtitles[1], settings, subbed)
         subbed.replace(video)
     final = out_dir / f"{settings.label}.mp4"
-    _ffmpeg(
+    ffmpeg(
         [
             "-i", str(video), "-i", str(audio),
             "-map", "0:v", "-map", "1:a:0", "-map_chapters", "-1", "-map_metadata", "-1",
