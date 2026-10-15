@@ -6,7 +6,7 @@ prints these results; an MCP server can expose the same functions as tools uncha
 
 import re
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
@@ -50,11 +50,20 @@ from tokimeki.mad.subtitles import write_subtitles
 from tokimeki.mad.validate import Issue, validate
 from tokimeki.mad.voices import pick_voice, refine_voices, usable_lines
 from tokimeki.media.audio import AudioError
+from tokimeki.media.cue import read_cue
 from tokimeki.render.fonts import FontError, prepare_fonts
 from tokimeki.render.video import FINAL, PREVIEW
+from tokimeki.voice.bank import BankError, export_bank
+from tokimeki.voice.cover import Source, cover
+from tokimeki.voice.engines import seed_vc
+from tokimeki.voice.engines.gpt_sovits import TrainSettings
+from tokimeki.voice.engines.venv import EngineError
 from tokimeki.voice.page import write_page
-from tokimeki.voice.paths import page_dir
+from tokimeki.voice.paths import bank_dir, model_dir, page_dir
 from tokimeki.voice.review import review, write_clips
+from tokimeki.voice.samples import parse_new, render_samples
+from tokimeki.voice.tts import Utterance, VoiceError, reference, speak
+from tokimeki.voice.tts import train as train_voice
 
 type Json = dict[str, object]
 
@@ -556,3 +565,112 @@ def voice_page(series: str) -> Json:
     data = review(ctx)
     cut = write_clips(ctx, data)
     return {"page": str(write_page(page_dir(ctx.paths), series, data)), "clips_cut": cut}
+
+
+def _voice_call[T](run: Callable[[], T]) -> T:
+    try:
+        return run()
+    except (KeyError, ValueError, BankError, VoiceError, EngineError) as error:
+        message = error.args[0] if isinstance(error, KeyError) else str(error)
+        raise ApiError(str(message)) from error
+
+
+def voice_bank(series: str, character: str) -> Json:
+    """Export a named speaker's voice bank (wavs and trainer lists) and its size."""
+    ctx = _series(series)
+    return cast(Json, asdict(_voice_call(lambda: export_bank(ctx, character))))
+
+
+def voice_train(series: str, character: str, settings: TrainSettings) -> Json:
+    """Fine-tune GPT-SoVITS on an exported bank: weights, time and peak GPU memory."""
+    ctx = _series(series)
+    return cast(Json, asdict(_voice_call(lambda: train_voice(ctx, character, settings))))
+
+
+def voice_say(
+    series: str,
+    character: str,
+    text: str,
+    output: str,
+    style: str | None = None,
+    line: int | None = None,
+    zero_shot: bool = False,
+) -> Json:
+    """Say `text` in her voice into `output` (WAV), like a reference clip from her bank."""
+    ctx = _series(series)
+    out = Path(output).expanduser().resolve()
+
+    def run() -> Json:
+        ref = reference(ctx, character, style, line)
+        seconds = speak(ctx, character, [Utterance(text, out, ref)], zero_shot)
+        return {
+            "output": str(out),
+            "reference": {"line": ref.line, "text": ref.text, "style": ref.style},
+            "model": "zero-shot" if zero_shot else "fine-tuned",
+            "seconds": round(seconds, 1),
+        }
+
+    return _voice_call(run)
+
+
+def voice_samples(series: str, character: str, new: Sequence[str], real: int = 6) -> Json:
+    """Her real lines said again and new ones (`STYLE:text`), by both models, with a page."""
+    ctx = _series(series)
+    lines = [parse_new(spec) for spec in new]
+    return {"page": str(_voice_call(lambda: render_samples(ctx, character, lines, real)))}
+
+
+def voice_train_singing(series: str, character: str, steps: int = 1000) -> Json:
+    """Fine-tune Seed-VC's singing model on an exported bank."""
+    ctx = _series(series)
+
+    def run() -> Json:
+        start = time.monotonic()
+        out = seed_vc.fine_tune(
+            seed_vc.Engine.default(),
+            bank_dir(ctx.paths, character) / "wavs",
+            f"{ctx.paths.root.name}-{character}",
+            steps,
+            model_dir(ctx.paths, character, seed_vc.NAME) / "ft_model.pth",
+        )
+        return {"model": str(out), "steps": steps, "seconds": round(time.monotonic() - start)}
+
+    return _voice_call(run)
+
+
+def _source(path: str, track: int | None, span: str | None) -> Source:
+    file = Path(path).expanduser()
+    if file.suffix.lower() == ".cue":
+        sheet = read_cue(file)
+        chosen = next((t for t in sheet.tracks if t.number == (track or 1)), None)
+        if chosen is None:
+            raise ApiError(f"{file.name} has no track {track}")
+        duration = chosen.end - chosen.start if chosen.end is not None else None
+        return Source(sheet.file, chosen.start, duration)
+    if span is not None:
+        a, b = parse_range(span)
+        return Source(file, a, b - a)
+    return Source(file)
+
+
+def voice_cover(
+    series: str,
+    character: str,
+    song: str,
+    name: str,
+    track: int | None = None,
+    span: str | None = None,
+    instrumental: str | None = None,
+    instrumental_track: int | None = None,
+    semitones: int = 0,
+    zero_shot: bool = False,
+) -> Json:
+    """Her voice singing a song: the vocal separated, converted by Seed-VC, mixed back over
+    the instrumental (the release's, from `instrumental`, or what separation left)."""
+    ctx = _series(series)
+    source = _source(song, track, span)
+    backing = _source(instrumental, instrumental_track, None) if instrumental else None
+    report = _voice_call(
+        lambda: cover(ctx, character, source, backing, name, semitones, not zero_shot)
+    )
+    return cast(Json, asdict(report))

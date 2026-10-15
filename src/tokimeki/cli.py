@@ -20,6 +20,11 @@ from tokimeki.library.series import Context, open_series
 from tokimeki.selfcheck import run_checks
 from tokimeki.server.app import LOOPBACK, find_series, serve
 from tokimeki.voice import speakers
+from tokimeki.voice import transcripts as transcripts_stage
+from tokimeki.voice.asr import MODEL_REPO as ASR_MODEL
+from tokimeki.voice.bank import BankError
+from tokimeki.voice.engines import gpt_sovits, seed_vc
+from tokimeki.voice.engines.venv import EngineError
 from tokimeki.voice.store import (
     clean_voices,
     find_speaker,
@@ -27,6 +32,7 @@ from tokimeki.voice.store import (
     list_speaker_fixes,
     list_speakers,
 )
+from tokimeki.voice.tts import VoiceError, define_style
 
 type Handler = Callable[[argparse.Namespace], int]
 
@@ -439,6 +445,99 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_voice_transcribe(args: argparse.Namespace) -> int:
+    model: str = args.model
+    ctx = open_series(_series(args))
+    print(f"{transcripts_stage.run(ctx, _registered(ctx, args.episode), model)} lines transcribed")
+    return 0
+
+
+def cmd_voice_bank(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    return _emit(lambda: api.voice_bank(series, character))
+
+
+def cmd_voice_install(args: argparse.Namespace) -> int:
+    engine: str = args.engine
+    try:
+        if engine == gpt_sovits.NAME:
+            gpt_sovits.install(gpt_sovits.Engine.default())
+        else:
+            seed_vc.install(seed_vc.Engine.default())
+    except EngineError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"{engine} installed")
+    return 0
+
+
+def cmd_voice_train(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    settings = gpt_sovits.TrainSettings(
+        args.sovits_epochs, args.gpt_epochs, args.sovits_batch, args.gpt_batch
+    )
+    return _emit(lambda: api.voice_train(series, character, settings))
+
+
+def cmd_voice_train_singing(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    steps: int = args.steps
+    return _emit(lambda: api.voice_train_singing(series, character, steps))
+
+
+def cmd_voice_style(args: argparse.Namespace) -> int:
+    character: str = args.character
+    style: str = args.style
+    line: int = args.line
+    ctx = open_series(_series(args))
+    try:
+        define_style(ctx, character, style, line)
+    except (KeyError, VoiceError, BankError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_voice_say(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    text: str = args.text
+    output: str = args.output
+    style: str | None = args.style
+    line: int | None = args.ref
+    zero_shot: bool = args.zero_shot
+    return _emit(lambda: api.voice_say(series, character, text, output, style, line, zero_shot))
+
+
+def cmd_voice_samples(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    new: list[str] = args.new or []
+    real: int = args.real
+    return _emit(lambda: api.voice_samples(series, character, new, real))
+
+
+def cmd_voice_cover(args: argparse.Namespace) -> int:
+    series: str = args.series
+    character: str = args.character
+    song: str = args.song
+    name: str = args.name
+    track: int | None = args.track
+    span: str | None = args.range
+    backing: str | None = args.instrumental
+    backing_track: int | None = args.instrumental_track
+    semitones: int = args.semitones
+    zero_shot: bool = args.zero_shot
+    return _emit(
+        lambda: api.voice_cover(
+            series, character, song, name, track, span, backing, backing_track, semitones, zero_shot
+        )
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tokimeki", description=__doc__)
     sub = parser.add_subparsers(required=True, metavar="command")
@@ -661,6 +760,64 @@ def build_parser() -> argparse.ArgumentParser:
     vlines = voice_command("lines", cmd_voice_lines, "a speaker's lines with their subtitles")
     vlines.add_argument("speaker", help="id or name")
     voice_command("page", cmd_voice_page, "write the listening page for naming speakers")
+    vtr = voice_command(
+        "transcribe", cmd_voice_transcribe, "Japanese text of every voiced line (GPU)"
+    )
+    vtr.add_argument("--episode", action="append", help="only episodes containing this")
+    vtr.add_argument("--model", default=ASR_MODEL, help="a Whisper model on the Hub")
+    vbank = voice_command("bank", cmd_voice_bank, "export a character's voice bank")
+    vbank.add_argument("character", help="a named speaker")
+    vinstall = voice_sub.add_parser(
+        "install", help="install an external engine in its own venv (network)"
+    )
+    vinstall.set_defaults(handler=cmd_voice_install)
+    vinstall.add_argument("engine", choices=(gpt_sovits.NAME, seed_vc.NAME))
+    vtrain = voice_command(
+        "train", cmd_voice_train, "fine-tune GPT-SoVITS on a character's bank (whole GPU)"
+    )
+    vtrain.add_argument("character", help="a named speaker with an exported bank")
+    defaults = gpt_sovits.TrainSettings()
+    vtrain.add_argument("--sovits-epochs", type=int, default=defaults.sovits_epochs)
+    vtrain.add_argument("--gpt-epochs", type=int, default=defaults.gpt_epochs)
+    vtrain.add_argument("--sovits-batch", type=int, default=defaults.sovits_batch)
+    vtrain.add_argument("--gpt-batch", type=int, default=defaults.gpt_batch)
+    vsing = voice_command(
+        "train-singing", cmd_voice_train_singing, "fine-tune Seed-VC's singing model on a bank"
+    )
+    vsing.add_argument("character", help="a named speaker with an exported bank")
+    vsing.add_argument("--steps", type=int, default=1000)
+    vstyle = voice_command(
+        "style", cmd_voice_style, "name a bank line as the reference of a speaking style"
+    )
+    vstyle.add_argument("character")
+    vstyle.add_argument("style", help="e.g. teasing, calm, shouting")
+    vstyle.add_argument("--line", type=int, required=True, help="a line id in her bank")
+    vsay = voice_command("say", cmd_voice_say, "say a Japanese line in a character's voice")
+    vsay.add_argument("character")
+    vsay.add_argument("text", help="Japanese text")
+    vsay.add_argument("-o", "--output", required=True, help="the WAV to write")
+    vref = vsay.add_mutually_exclusive_group()
+    vref.add_argument("--style", help="a style set with `voice style`")
+    vref.add_argument("--ref", type=int, help="a line id in her bank to speak like")
+    vsay.add_argument(
+        "--zero-shot", action="store_true", help="the pretrained model, not the fine-tuned one"
+    )
+    vsamples = voice_command(
+        "samples", cmd_voice_samples, "render a sample set (real and new lines, both models)"
+    )
+    vsamples.add_argument("character")
+    vsamples.add_argument("--new", action="append", help="STYLE:text or text (repeatable)")
+    vsamples.add_argument("--real", type=int, default=6, help="how many real lines to redo")
+    vcover = voice_command("cover", cmd_voice_cover, "a song sung in a character's voice (GPU)")
+    vcover.add_argument("character")
+    vcover.add_argument("song", help="an audio file, or a .cue sheet with --track")
+    vcover.add_argument("--name", required=True, help="the cover's folder name")
+    vcover.add_argument("--track", type=int, help="track of a .cue sheet")
+    vcover.add_argument("--range", help="the song within the file, e.g. 1:02-5:30")
+    vcover.add_argument("--instrumental", help="the release's instrumental (file or .cue)")
+    vcover.add_argument("--instrumental-track", type=int, help="its track of a .cue sheet")
+    vcover.add_argument("--semitones", type=int, default=0, help="shift the melody")
+    vcover.add_argument("--zero-shot", action="store_true", help="without the fine-tune")
     return parser
 
 
