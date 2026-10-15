@@ -173,4 +173,45 @@ CREATE TABLE cast_fixes (
 ) STRICT;
 """
 
-MIGRATIONS: tuple[str, ...] = (V1, V2, V3, V4, V5)
+# Who says each line, and how it sounds. A line's voice is where it is heard in the episode's
+# voice stem; only clean ones (one speaker, enough voice) get an embedding and a speaker.
+# Speakers are clustered like faces: named ones are kept, and a fix pins a line to a named
+# speaker (NULL: to nobody) through every later clustering.
+V6 = """
+CREATE TABLE speakers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE
+) STRICT;
+
+CREATE TABLE line_voices (
+    line_id INTEGER PRIMARY KEY REFERENCES lines(id) ON DELETE CASCADE,
+    start REAL NOT NULL,
+    end REAL NOT NULL CHECK (end > start),
+    status TEXT NOT NULL CHECK (status IN ('clean', 'overlap', 'short', 'long', 'silent', 'mixed')),
+    embedding BLOB,
+    speaker_id INTEGER REFERENCES speakers(id) ON DELETE SET NULL,
+    CHECK (status = 'clean' OR speaker_id IS NULL)
+) STRICT;
+
+CREATE INDEX line_voices_speaker ON line_voices(speaker_id);
+
+CREATE TABLE speaker_fixes (
+    line_id INTEGER PRIMARY KEY REFERENCES lines(id) ON DELETE CASCADE,
+    speaker_id INTEGER REFERENCES speakers(id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE transcripts (
+    line_id INTEGER PRIMARY KEY REFERENCES lines(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    text TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE voice_styles (
+    speaker_id INTEGER NOT NULL REFERENCES speakers(id) ON DELETE CASCADE,
+    style TEXT NOT NULL,
+    line_id INTEGER NOT NULL REFERENCES lines(id) ON DELETE CASCADE,
+    PRIMARY KEY (speaker_id, style)
+) STRICT;
+"""
+
+MIGRATIONS: tuple[str, ...] = (V1, V2, V3, V4, V5, V6)
