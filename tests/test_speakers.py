@@ -4,14 +4,18 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from voices import HIGH, LOW, ToneEncoder, series, tone
+from voices import HIGH, LOW, NANA_LINES, ToneEncoder, series, tone
 
+from tokimeki.anime import repeats
+from tokimeki.anime.repeats import Repeat
 from tokimeki.cli import main
 from tokimeki.library import episodes as episode_db
+from tokimeki.library import shots as shot_db
 from tokimeki.library.lines import list_lines
-from tokimeki.library.records import Line, LineKind
+from tokimeki.library.records import Line, LineKind, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.voice import speakers
-from tokimeki.voice.clips import CLIP_RATE, cut_lines
+from tokimeki.voice.clips import CLIP_RATE, cut_lines, episode_cuts
 from tokimeki.voice.embedding import DIMENSIONS, SpeakerEncoder
 from tokimeki.voice.page import render_page
 from tokimeki.voice.review import review, write_clips
@@ -48,6 +52,22 @@ def test_lines_are_cut_to_their_voice_with_a_status() -> None:
 
 def _line(i: int, a: float, b: float) -> Line:
     return Line(i + 1, 1, a, b, LineKind.DIALOGUE, "Default", "x")
+
+
+def test_lines_in_recurring_shots_are_not_cut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = series(tmp_path)
+    episode = episode_db.list_episodes(ctx.conn)[0]
+    nana_shot = shot_db.list_shots(ctx.conn, episode.id, ShotStatus.KEPT)[1]
+    before = {c.line.id for c in episode_cuts(ctx, episode)[0]}
+
+    def marked(_: Context) -> dict[int, Repeat]:
+        return {nana_shot.id: Repeat("preview", (99,))}
+
+    monkeypatch.setattr(repeats, "update", marked)
+    after = {c.line.id for c in episode_cuts(ctx, episode)[0]}
+    assert after < before and len(before - after) == len(NANA_LINES)
 
 
 def test_stage_clusters_voices_and_names_them_from_close_ups(

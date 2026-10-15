@@ -12,11 +12,12 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.anime import repeats
 from tokimeki.anime.stems import heard, search_window, stem_path
 from tokimeki.library.lines import list_lines, list_parts
-from tokimeki.library.records import Episode, Line, LineKind
+from tokimeki.library.records import Episode, Line, LineKind, ShotStatus
 from tokimeki.library.series import Context
-from tokimeki.library.shots import kept_ranges
+from tokimeki.library.shots import kept_ranges, list_shots
 from tokimeki.media.audio import decode_audio
 from tokimeki.voice.store import VoiceStatus
 
@@ -89,11 +90,19 @@ def cut_lines(
 
 
 def episode_cuts(ctx: Context, episode: Episode) -> tuple[list[Cut], NDArray[np.float32]]:
-    """The episode's cuts, and its voice stem as mono `CLIP_RATE` audio to take them from."""
+    """The episode's cuts, and its voice stem as mono `CLIP_RATE` audio to take them from.
+    Lines in the OP/ED or in shots that recur across episodes (previews, recaps) are left out,
+    so a line heard twice is not two clips."""
     stem = decode_audio(stem_path(ctx.paths, episode.id), CLIP_RATE)
     dialogue = list_lines(ctx.conn, episode.id, LineKind.DIALOGUE)
-    parts = [(p.start, p.end) for p in list_parts(ctx.conn, episode.id)]
-    return cut_lines(dialogue, kept_ranges(ctx.conn, episode), parts, stem, CLIP_RATE), stem
+    skipped = [(p.start, p.end) for p in list_parts(ctx.conn, episode.id)]
+    recurring = repeats.update(ctx)
+    skipped += [
+        (episode.seconds(s.start_frame), episode.seconds(s.end_frame))
+        for s in list_shots(ctx.conn, episode.id, ShotStatus.KEPT)
+        if s.id in recurring
+    ]
+    return cut_lines(dialogue, kept_ranges(ctx.conn, episode), skipped, stem, CLIP_RATE), stem
 
 
 def samples(stem: NDArray[np.float32], rate: int, start: float, end: float) -> NDArray[np.float32]:
