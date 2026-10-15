@@ -12,11 +12,11 @@ from tokimeki.library.cast import named_cast_by_shot
 from tokimeki.library.episodes import get_episode
 from tokimeki.library.lines import get_line, list_lines, list_parts, shots_in_parts
 from tokimeki.library.records import Episode, Line, LineKind, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.library.shots import kept_ranges, list_shots
 from tokimeki.mad.plan import Plan, VoicePlan
 from tokimeki.song.analysis import SongAnalysis
 from tokimeki.song.gaps import Gap, gaps
-from tokimeki.stages.base import Context
 from tokimeki.stages.voice import voice_bounds
 
 MAX_VOICE = 8.0

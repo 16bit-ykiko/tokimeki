@@ -14,12 +14,12 @@ from tokimeki.library.episodes import (
     stage_done,
 )
 from tokimeki.library.records import Episode
+from tokimeki.library.series import Context
 from tokimeki.library.shots import replace_shots
 from tokimeki.media.decode import decode_for_transnet
 from tokimeki.media.probe import probe, require_nvdec
 from tokimeki.models.gpu import loaded
 from tokimeki.models.transnet import THRESHOLD, TransNet, shots_from_predictions
-from tokimeki.stages.base import Context
 from tokimeki.stages.frames import ensure_frames
 
 NAME = "shots"

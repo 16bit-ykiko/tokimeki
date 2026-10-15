@@ -4,11 +4,11 @@ import fakes
 import pytest
 from clips import make_clip
 
+from tokimeki.library.series import open_series
 from tokimeki.library.shots import list_shots
 from tokimeki.report import build_report
 from tokimeki.report.render import clock, framing
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 
 

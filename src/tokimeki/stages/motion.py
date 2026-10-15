@@ -13,13 +13,13 @@ from numpy.typing import NDArray
 
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.library.records import Episode, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.library.shots import list_shots
 from tokimeki.media.decode import MOTION_SIZE, decode_luma
 from tokimeki.models.gpu import loaded
 from tokimeki.models.motion import CHANGED, MotionMeter
-from tokimeki.paths import SeriesPaths
-from tokimeki.stages.base import Context
 
 NAME = "motion"
 

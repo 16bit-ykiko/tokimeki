@@ -7,11 +7,11 @@ import torch
 from clips import make_clip
 
 from tokimeki.library.episodes import stage_done
+from tokimeki.library.series import open_series
 from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio
 from tokimeki.models.separation import CHUNK, N_FFT, SAMPLE_RATE, separate_chunks
 from tokimeki.stages import pipeline, voice
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 
 

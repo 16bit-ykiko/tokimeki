@@ -6,13 +6,13 @@ import pytest
 from clips import make_clip
 from test_plan import candidate, song
 
+from tokimeki.library.series import open_series
 from tokimeki.mad.motion import Onset, ShotMotion, shot_motion
 from tokimeki.mad.plan import Plan, SlotPlan
 from tokimeki.mad.refine import refine, sync
 from tokimeki.media.decode import decode_luma
 from tokimeki.models.motion import MotionMeter
 from tokimeki.stages import motion, pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 
 

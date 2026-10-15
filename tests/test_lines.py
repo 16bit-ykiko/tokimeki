@@ -21,11 +21,11 @@ from tokimeki.library.lines import (
     shots_in_parts,
 )
 from tokimeki.library.records import LineKind, Part, PartKind
+from tokimeki.library.series import open_series
 from tokimeki.media.audio import main_audio
 from tokimeki.media.subtitles import ass_time, parse_ass
 from tokimeki.models.vad import FRAME_SECONDS, frame_blocks
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.lines import classify, speech_mask, timing_check
 from tokimeki.stages.pipeline import register_episodes
 

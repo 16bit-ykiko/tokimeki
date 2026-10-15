@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tokimeki.library.db import open_library
-from tokimeki.paths import SeriesPaths
+from tokimeki.library.paths import SeriesPaths
 
 
 @dataclass(frozen=True)

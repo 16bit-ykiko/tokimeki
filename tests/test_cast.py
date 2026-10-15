@@ -14,10 +14,10 @@ from tokimeki.library import episodes as episode_db
 from tokimeki.library import shots as shot_db
 from tokimeki.library.db import open_library
 from tokimeki.library.records import Box, Rating
+from tokimeki.library.series import open_series
 from tokimeki.models.ccip import CcipEncoder, ccip_differences
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.stages import cast, pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.cast import MIN_CLUSTER_FACES, assign_clusters, split_cluster
 from tokimeki.stages.clustering import average_linkage, evenly_spaced
 from tokimeki.stages.faces import head_box

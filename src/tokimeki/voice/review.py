@@ -13,8 +13,8 @@ import numpy as np
 
 from tokimeki.library.episodes import get_episode, list_episodes
 from tokimeki.library.lines import get_line
+from tokimeki.library.series import Context
 from tokimeki.media.audio import decode_audio, encode_audio
-from tokimeki.stages.base import Context
 from tokimeki.stages.voice import stem_path
 from tokimeki.voice.embedding import cosine_distances
 from tokimeki.voice.paths import page_dir

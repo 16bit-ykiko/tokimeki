@@ -17,11 +17,11 @@ from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.lines import NewLine, replace_lines
 from tokimeki.library.records import Episode, LineKind, Part, PartKind
+from tokimeki.library.series import Context
 from tokimeki.media.audio import decode_audio, main_audio
 from tokimeki.media.subtitles import SubtitleEvent, read_ass
 from tokimeki.models.gpu import loaded
 from tokimeki.models.vad import FRAME_SECONDS, SAMPLE_RATE, SileroVad
-from tokimeki.stages.base import Context
 
 NAME = "lines"
 

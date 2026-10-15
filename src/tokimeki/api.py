@@ -14,6 +14,7 @@ from typing import cast
 from tokimeki.library.episodes import find_episode, get_episode, stage_done
 from tokimeki.library.lines import list_lines
 from tokimeki.library.records import Episode, LineKind
+from tokimeki.library.series import Context, open_series
 from tokimeki.library.shots import get_shot
 from tokimeki.mad.arrange import draft
 from tokimeki.mad.candidates import Candidate, find_candidates
@@ -46,7 +47,6 @@ from tokimeki.song.analysis import (
 )
 from tokimeki.song.lyrics import LyricSource, pair
 from tokimeki.stages import motion, voice
-from tokimeki.stages.base import Context, open_series
 from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.voice import voice_bounds
 from tokimeki.voice.page import write_page

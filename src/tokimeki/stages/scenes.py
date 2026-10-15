@@ -18,10 +18,10 @@ from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.lines import lines_by_shot, shots_in_parts
 from tokimeki.library.records import Episode, Line, PartKind, Scene, ShotStatus, TagStat
 from tokimeki.library.scenes import list_scenes, replace_scenes
+from tokimeki.library.series import Context
 from tokimeki.library.shots import list_frames, list_shots
 from tokimeki.library.tags import tag_stats
 from tokimeki.media.images import load_image
-from tokimeki.stages.base import Context
 
 NAME = "scenes"
 

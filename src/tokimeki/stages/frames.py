@@ -1,9 +1,9 @@
 from collections.abc import Sequence
 
 from tokimeki.library.records import Episode, Shot
+from tokimeki.library.series import Context
 from tokimeki.media.decode import extract_frames
 from tokimeki.media.sampling import sample_frames
-from tokimeki.stages.base import Context
 
 
 def planned_frames(episode: Episode, shot: Shot) -> list[int]:

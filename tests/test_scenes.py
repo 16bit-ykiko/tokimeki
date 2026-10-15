@@ -13,9 +13,9 @@ from tokimeki.library import shots as shot_db
 from tokimeki.library.db import open_library
 from tokimeki.library.records import PartKind, Rating, Tag, TagCategory
 from tokimeki.library.scenes import list_scenes, replace_scenes
+from tokimeki.library.series import open_series
 from tokimeki.library.tags import frame_tag_scores, tag_stats
 from tokimeki.stages import pipeline, scenes
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.scenes import ShotFacts, colour_histogram, continues, group
 

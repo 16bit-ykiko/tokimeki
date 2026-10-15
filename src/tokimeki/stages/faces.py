@@ -18,12 +18,12 @@ from tokimeki.library.cast import NewFace, add_faces, clear_episode_faces
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.records import Box, Episode, Frame, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.library.shots import list_episode_frames, list_shots
 from tokimeki.media.images import load_image, square_around
 from tokimeki.models.ccip import CcipEncoder
 from tokimeki.models.faces import Detection, FaceDetector
 from tokimeki.models.gpu import loaded, prefetched
-from tokimeki.stages.base import Context
 from tokimeki.stages.cast import assign_clusters
 from tokimeki.stages.frames import ensure_frames
 

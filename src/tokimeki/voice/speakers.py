@@ -27,9 +27,9 @@ from tokimeki.library.cast import episode_cast, list_clusters
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, get_episode, mark_stage_done, stage_done
 from tokimeki.library.records import Episode, ShotCast, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.library.shots import list_shots
 from tokimeki.models.gpu import loaded
-from tokimeki.stages.base import Context
 from tokimeki.stages.clustering import average_linkage, evenly_spaced
 from tokimeki.voice.clips import CLIP_RATE, Cut, episode_cuts, samples
 from tokimeki.voice.embedding import MODEL_FILE, SpeakerEncoder, cosine_distances

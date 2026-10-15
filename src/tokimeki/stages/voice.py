@@ -14,13 +14,13 @@ from numpy.typing import NDArray
 
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.library.records import Episode, Line
+from tokimeki.library.series import Context
 from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio, encode_audio, main_audio
 from tokimeki.models.gpu import loaded
 from tokimeki.models.separation import MODEL_FILE, SAMPLE_RATE, VocalSeparator
-from tokimeki.paths import SeriesPaths
-from tokimeki.stages.base import Context
 
 NAME = "voice"
 EDGE_RAMP = 0.01

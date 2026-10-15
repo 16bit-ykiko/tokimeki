@@ -12,9 +12,9 @@ from tokimeki.library.cast import named_cast_by_shot, named_faces
 from tokimeki.library.lines import lines_by_shot, shots_in_parts
 from tokimeki.library.records import Episode, Shot, ShotStatus, TagStat
 from tokimeki.library.scenes import list_scenes
+from tokimeki.library.series import Context
 from tokimeki.library.shots import list_shots
 from tokimeki.library.tags import EXPRESSION_TAGS, frame_tag_scores, tag_stats
-from tokimeki.stages.base import Context
 
 CUTE: dict[str, float] = {
     "blush": 1.0,

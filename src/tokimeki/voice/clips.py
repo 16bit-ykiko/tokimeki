@@ -14,9 +14,9 @@ from numpy.typing import NDArray
 
 from tokimeki.library.lines import list_lines, list_parts
 from tokimeki.library.records import Episode, Line, LineKind
+from tokimeki.library.series import Context
 from tokimeki.library.shots import kept_ranges
 from tokimeki.media.audio import decode_audio
-from tokimeki.stages.base import Context
 from tokimeki.stages.voice import heard, search_window, stem_path
 from tokimeki.voice.store import VoiceStatus
 

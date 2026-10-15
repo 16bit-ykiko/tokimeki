@@ -13,6 +13,7 @@ from clips import make_clip
 from test_plan import song
 
 from tokimeki import api
+from tokimeki.library.series import open_series
 from tokimeki.mad.fonts import Fonts
 from tokimeki.mad.plan import Plan, SlotPlan, VoicePlan
 from tokimeki.mad.render import clip_key, slot_frames
@@ -22,7 +23,6 @@ from tokimeki.models.timeline import TimelineClip, write_timeline
 from tokimeki.song.analysis import SongSource, save_analysis
 from tokimeki.song.lyrics import LyricLine, pair
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 
 

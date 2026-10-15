@@ -7,10 +7,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.mad.candidates import Candidate
 from tokimeki.mad.plan import Plan
 from tokimeki.media.images import load_image
-from tokimeki.paths import SeriesPaths
 
 THUMB_WIDTH = 240
 

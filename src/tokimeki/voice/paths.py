@@ -8,7 +8,7 @@ trained models and the rendered samples. Shared by every series, under `$TOKIMEK
 import os
 from pathlib import Path
 
-from tokimeki.paths import SeriesPaths
+from tokimeki.library.paths import SeriesPaths
 
 
 def home() -> Path:

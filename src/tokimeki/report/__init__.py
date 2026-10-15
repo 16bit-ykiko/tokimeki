@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from tokimeki.paths import SeriesPaths
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.report.data import gather
 from tokimeki.report.images import write_face, write_thumbnail
 from tokimeki.report.render import render

@@ -12,8 +12,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.library.records import Episode, Shot
-from tokimeki.paths import SeriesPaths
 from tokimeki.stages.motion import load_motion
 
 ACTIVE = 0.015

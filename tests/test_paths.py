@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tokimeki.paths import SeriesPaths
+from tokimeki.library.paths import SeriesPaths
 
 
 def test_layout_is_hidden_next_to_episodes(tmp_path: Path) -> None:

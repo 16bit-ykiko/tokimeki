@@ -12,6 +12,7 @@ from clips import make_clip
 from tokimeki import api
 from tokimeki.library.lines import NewLine, list_lines, replace_lines
 from tokimeki.library.records import Episode, LineKind, Shot, ShotStatus, TagStat
+from tokimeki.library.series import open_series
 from tokimeki.mad.arrange import arrange, fits
 from tokimeki.mad.candidates import Candidate, FramePoint, cuteness
 from tokimeki.mad.plan import PLAN_JSON_SCHEMA, Plan, PlanFormatError, SlotPlan, VoicePlan
@@ -21,7 +22,6 @@ from tokimeki.song.lyrics import LyricLine
 from tokimeki.song.slots import Slot
 from tokimeki.song.structure import Section
 from tokimeki.stages import pipeline
-from tokimeki.stages.base import open_series
 from tokimeki.stages.pipeline import register_episodes
 
 EPISODE = Episode(1, "ep01.mkv", 1920, 1080, Fraction(24), 24 * 600)

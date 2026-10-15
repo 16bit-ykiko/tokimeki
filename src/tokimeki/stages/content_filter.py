@@ -16,6 +16,7 @@ from tokimeki.library.cast import delete_empty_clusters
 from tokimeki.library.db import transaction
 from tokimeki.library.episodes import clear_stage, mark_stage_done, stage_done
 from tokimeki.library.records import Episode, Rating, Shot, ShotStatus, Tag, TagCategory
+from tokimeki.library.series import Context
 from tokimeki.library.shots import (
     RatedFrame,
     drop_shot,
@@ -28,7 +29,6 @@ from tokimeki.library.shots import (
 from tokimeki.media.images import load_image
 from tokimeki.models.gpu import loaded, prefetched
 from tokimeki.models.wd14 import Prediction, Wd14Tagger
-from tokimeki.stages.base import Context
 from tokimeki.stages.frames import ensure_frames, planned_frames
 
 NAME = "filter"

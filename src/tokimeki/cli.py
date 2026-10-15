@@ -11,9 +11,9 @@ from tokimeki import api
 from tokimeki.library.episodes import list_episodes
 from tokimeki.library.lines import get_line
 from tokimeki.library.records import Episode
+from tokimeki.library.series import Context, open_series
 from tokimeki.report import build_report
 from tokimeki.stages import cast, pipeline, scenes
-from tokimeki.stages.base import Context, open_series
 from tokimeki.stages.pipeline import register_episodes
 from tokimeki.stages.selfcheck import run_checks
 from tokimeki.voice import speakers

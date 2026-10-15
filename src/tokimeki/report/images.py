@@ -3,8 +3,8 @@ from pathlib import Path
 from PIL import Image
 
 from tokimeki.library.cast import FaceInShot
+from tokimeki.library.paths import SeriesPaths
 from tokimeki.media.images import load_image, square_around
-from tokimeki.paths import SeriesPaths
 
 THUMBNAIL_WIDTH = 320
 FACE_SIZE = 112

@@ -4,10 +4,10 @@ from dataclasses import dataclass
 
 from tokimeki.library.episodes import find_episode, list_episodes, register_episode, stage_done
 from tokimeki.library.records import Episode, ShotStatus
+from tokimeki.library.series import Context
 from tokimeki.library.shots import status_counts
 from tokimeki.media.probe import probe
 from tokimeki.stages import content_filter, faces, lines, motion, scenes, shots, voice
-from tokimeki.stages.base import Context
 
 log = logging.getLogger("tokimeki")
 
