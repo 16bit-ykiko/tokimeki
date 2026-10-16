@@ -778,7 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
     vtrain.add_argument("character", help="a named speaker with an exported bank")
     defaults = gpt_sovits.TrainSettings()
     vtrain.add_argument("--sovits-epochs", type=int, default=defaults.sovits_epochs)
-    vtrain.add_argument("--gpt-epochs", type=int, default=defaults.gpt_epochs)
+    vtrain.add_argument(
+        "--gpt-epochs", type=int, help=f"default: about {gpt_sovits.GPT_STEPS} steps over the bank"
+    )
     vtrain.add_argument("--sovits-batch", type=int, default=defaults.sovits_batch)
     vtrain.add_argument("--gpt-batch", type=int, default=defaults.gpt_batch)
     vsing = voice_command(

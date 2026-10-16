@@ -58,4 +58,18 @@ External engines run from their own checkouts and venvs under `$TOKIMEKI_HOME/en
 - **Cost.** On Momo's bank (248 lines, 11.9 min) on the 8 GB laptop GPU: the dataset steps and 8 SoVITS epochs take 15 min at about 5.5 GB, 15 GPT epochs 3 min at 4.7 GB. Seed-VC's fine-tune of 800 steps (batch 2) takes 22 min, and converting the 89 s TV-size 楽園PROJECT 6 min (50 diffusion steps).
 - **How well.** Scored on 16 lines (6 of her real lines, re-synthesised, and 10 new ones): the fine-tuned model sounds like her where zero-shot sounds like the reference's general type, with a speaker-embedding cosine to her bank's mean of 0.60 against zero-shot's 0.34 (her own clips: 0.53); both say the text, at 4–5% CER by anime-whisper (zero-shot 12% on the real lines). Its failures are at the start of a line (「ふふっ、リトさん」 came out as 「わたしのさん」).
 
+### More data
+
+GPT-SoVITS was fine-tuned on growing slices of Momo's bank with everything else fixed (references, seeds, 20 held-out lines from S1 01–07 that no slice trains on, 10 new lines), each line spoken three times. Kana CER compares pyopenjtalk's readings of the text and of anime-whisper's transcript (so 私/わたし or 七/ナナ match); a take fails above 0.3 (cut short, babbling); similarity is the speaker-embedding cosine to her held-out lines.
+
+| slice | minutes | SoVITS / GPT epochs | kana CER held-out / new | failed takes | similarity held-out / new |
+|---|---|---|---|---|---|
+| zero-shot | – | – | 4.2% / 2.4% | 0% | 0.39 / 0.30 |
+| S1 01–07 | 10.7 | 8 / 15 | 4.7% / 2.9% | 3.3% | 0.62 / 0.57 |
+| + 2nd 01–07 | 19.8 | 8 / 15 | 5.8% / 7.5% | 7.8% | 0.61 / 0.53 |
+| same, half the epochs | 19.8 | 4 / 8 | 5.8% / 3.7% | 3.3% | 0.55 / 0.47 |
+| + 2nd 08–14 | 26.2 | 8 / 6 | 3.3% / 2.7% | 1.1% | 0.64 / 0.56 |
+
+Her own clips score 0.67. Swapping the halves of the first two models showed the failures follow the GPT: the same 15 epochs over twice the lines (twice the steps) cut lines short and laugh where an ellipsis was, while SoVITS needs its 8 epochs for the timbre. So `voice train` gives the GPT about 850 steps whatever the bank's size (`GPT_STEPS`), and with that more data helps.
+
 Voice banks, models and generated speech stay in the data directory and are never shared.

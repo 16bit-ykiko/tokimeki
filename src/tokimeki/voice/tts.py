@@ -57,6 +57,7 @@ def train(ctx: Context, character: str, settings: TrainSettings) -> TrainReport:
     engine = Engine.default()
     engine.require()
     lines = bank_lines(ctx.paths, character)
+    settings = settings.fitted(len(lines))
     bank = bank_dir(ctx.paths, character)
     root = model_dir(ctx.paths, character, gpt_sovits.NAME)
     work = root / "work"

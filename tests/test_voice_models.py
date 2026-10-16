@@ -117,6 +117,12 @@ def test_gpt_sovits_configs_follow_the_web_ui(tmp_path: Path) -> None:
     assert "torch" in SHARED and "numpy" in SHARED
 
 
+def test_gpt_epochs_keep_its_steps_about_the_same_for_any_bank() -> None:
+    fitted = [TrainSettings().fitted(lines).gpt_epochs for lines in (60, 228, 540, 5000)]
+    assert fitted == [15, 15, 6, 4]
+    assert TrainSettings(gpt_epochs=9).fitted(540).gpt_epochs == 9
+
+
 def test_new_lines_may_name_a_style() -> None:
     assert parse_new("teasing:ふふっ、リトさん") == parse_new("teasing: ふふっ、リトさん")
     assert parse_new("teasing:ふふっ").style == "teasing"

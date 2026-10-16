@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -142,12 +142,26 @@ def install(engine: Engine) -> None:
     engine.marker.write_text(json.dumps({"commit": COMMIT, "version": VERSION}))
 
 
+GPT_STEPS = 850
+"""GPT steps a fine-tune should take, whatever the bank's size. On 梦梦's bank 15 epochs of
+10.7 min (about 850 steps) spoke cleanly; the same 15 epochs of 19.8 min cut lines short and
+babbled twice as often; 6 epochs of 26 min did best of all (see docs/voices.md)."""
+
+
 @dataclass(frozen=True, slots=True)
 class TrainSettings:
     sovits_epochs: int = 8
-    gpt_epochs: int = 15
+    gpt_epochs: int | None = None
+    """None: as many as give the GPT about `GPT_STEPS` steps over the bank (4 to 15)."""
     sovits_batch: int = 4
     gpt_batch: int = 4
+
+    def fitted(self, lines: int) -> "TrainSettings":
+        """These settings with the GPT's epochs fixed for a bank of `lines`."""
+        if self.gpt_epochs is not None:
+            return self
+        epochs = round(GPT_STEPS * self.gpt_batch / max(lines, 1))
+        return replace(self, gpt_epochs=max(4, min(15, epochs)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +342,7 @@ def train(
     """Fine-tune SoVITS, then GPT, on a prepared dataset; the weights go to `out`. A stage
     whose weights were written after `listing` (the bank) last changed is not run again."""
     engine.require()
+    settings = settings.fitted(len(listing.read_text().splitlines()))
     log = work / "train.log"
     env = {"_CUDA_VISIBLE_DEVICES": "0", "version": VERSION, "hz": "25hz", **OFFLINE}
     sovits_dir, gpt_dir = out / "sovits", out / "gpt"
