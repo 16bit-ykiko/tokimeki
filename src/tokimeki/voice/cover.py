@@ -24,6 +24,11 @@ from tokimeki.voice.paths import bank_dir, character_dir, model_dir
 REFERENCE_SECONDS = 25.0
 """Seed-VC conditions on at most about 25 s of reference."""
 REFERENCE_GAP = 0.15
+REFERENCE_MAX = 8.0
+CLARITY_RATE = 16000
+PITCH_RANGE = (80.0, 650.0)
+VOICED = 0.45
+"""Normalised autocorrelation at the pitch lag above which a frame counts as voiced."""
 ALIGN_RATE = 1000
 MAX_SHIFT = 3.0
 """Seconds the instrumental may be offset from the mix on the disc."""
@@ -53,19 +58,46 @@ class CoverReport:
     instrumental_offset: float | None
 
 
+def clarity(samples: NDArray[np.float32], rate: int) -> float:
+    """Mean harmonics-to-noise ratio (dB) of the voiced 40 ms frames, from each frame's peak
+    normalised autocorrelation over the lags of a voice's pitch; -inf when nothing is voiced.
+
+    Seed-VC copies the reference's texture: a reference of shouted or breathy lines made the
+    converted singing noisier and less like her, one of her clearest calm lines made it as
+    clean as the source at no cost in likeness (docs/voices.md)."""
+    size, hop = round(0.04 * rate), round(0.01 * rate)
+    if len(samples) < size:
+        return float("-inf")
+    starts = np.arange(0, len(samples) - size + 1, hop)
+    frames = samples[starts[:, None] + np.arange(size)].astype(np.float64)
+    frames -= frames.mean(axis=1, keepdims=True)
+    energy = np.sum(frames**2, axis=1)
+    frames = frames[energy > 0.01 * energy.max()]
+    spectrum = np.fft.rfft(frames, 2 * size)
+    corr = np.fft.irfft(np.abs(spectrum) ** 2)[:, :size]
+    lo, hi = round(rate / PITCH_RANGE[1]), round(rate / PITCH_RANGE[0])
+    unbiased = corr[:, lo:hi] * (size / (size - np.arange(lo, hi)))
+    peak = unbiased.max(axis=1) / np.maximum(corr[:, 0], 1e-12)
+    voiced = np.clip(peak[peak > VOICED], VOICED, 0.999)
+    if len(voiced) == 0:
+        return float("-inf")
+    return float(np.mean(10 * np.log10(voiced / (1 - voiced))))
+
+
 def reference_clip(ctx: Context, character: str, out: Path) -> list[int]:
-    """Her clearest bank lines joined into one reference of about `REFERENCE_SECONDS`."""
-    lines = sorted(bank_lines(ctx.paths, character), key=lambda x: -x.seconds)
+    """Her clearest bank lines (see `clarity`) joined into one reference of about
+    `REFERENCE_SECONDS`, clearest first."""
     wavs = bank_dir(ctx.paths, character) / "wavs"
+    fitting = [x for x in bank_lines(ctx.paths, character) if x.seconds <= REFERENCE_MAX]
+    scored = [(clarity(decode_audio(wavs / x.wav, CLARITY_RATE), CLARITY_RATE), x) for x in fitting]
+    lines = [x for _, x in sorted(scored, key=lambda pair: -pair[0])]
     parts: list[NDArray[np.float32]] = []
     used: list[int] = []
     total = 0.0
     gap = np.zeros(round(REFERENCE_GAP * SAMPLE_RATE), dtype=np.float32)
     for x in lines:
-        if x.seconds > 8.0:
-            continue
         if total + x.seconds > REFERENCE_SECONDS:
-            break
+            continue
         parts += [decode_audio(wavs / x.wav, SAMPLE_RATE), gap]
         used.append(x.line)
         total += x.seconds + REFERENCE_GAP

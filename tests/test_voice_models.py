@@ -11,10 +11,11 @@ from voices import ToneEncoder, series
 
 from tokimeki.library import episodes as episode_db
 from tokimeki.library.series import Context
+from tokimeki.media.audio import decode_audio, encode_audio
 from tokimeki.models.separation import SAMPLE_RATE
 from tokimeki.voice import speakers, transcripts
 from tokimeki.voice.bank import BankError, bank_lines, export_bank, faded, letters
-from tokimeki.voice.cover import aligned, mix, offset
+from tokimeki.voice.cover import aligned, clarity, mix, offset, reference_clip
 from tokimeki.voice.engines import gpt_sovits
 from tokimeki.voice.engines.gpt_sovits import Engine, Request, TrainSettings
 from tokimeki.voice.engines.venv import SHARED
@@ -127,6 +128,28 @@ def test_new_lines_may_name_a_style() -> None:
     assert parse_new("teasing:ふふっ、リトさん") == parse_new("teasing: ふふっ、リトさん")
     assert parse_new("teasing:ふふっ").style == "teasing"
     assert parse_new("ふふっ:リトさん").style is None
+
+
+def test_reference_takes_her_clearest_lines_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rate = 16000
+    t = np.arange(rate) / rate
+    harmonics = np.stack([np.sin(2 * np.pi * 300 * k * t) / k for k in range(1, 6)])
+    voice: NDArray[np.float32] = harmonics.sum(axis=0).astype(np.float32)
+    noise = np.random.default_rng(0).normal(0, 0.5, rate).astype(np.float32)
+    assert clarity(voice, rate) > clarity(voice + noise, rate) + 5
+    assert clarity(np.zeros(rate, dtype=np.float32), rate) == float("-inf")
+    ctx = _named(tmp_path, monkeypatch)
+    transcripts.run(ctx, episode_db.list_episodes(ctx.conn), "fake/whisper")
+    root = Path(export_bank(ctx, "梦梦").directory)
+    lines = bank_lines(ctx.paths, "梦梦")
+    noisy = lines[0]
+    clean = decode_audio(root / "wavs" / noisy.wav, SAMPLE_RATE)
+    hiss = np.random.default_rng(1).normal(0, 0.3, len(clean)).astype(np.float32)
+    encode_audio((clean + hiss)[None], SAMPLE_RATE, root / "wavs" / noisy.wav)
+    used = reference_clip(ctx, "梦梦", tmp_path / "reference.wav")
+    assert sorted(used) == sorted(x.line for x in lines) and used[-1] == noisy.line
 
 
 def test_instrumental_is_aligned_to_the_mix_and_the_vocal_mixed_in() -> None:

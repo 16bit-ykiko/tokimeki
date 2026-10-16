@@ -72,4 +72,17 @@ GPT-SoVITS was fine-tuned on growing slices of Momo's bank with everything else 
 
 Her own clips score 0.67. Swapping the halves of the first two models showed the failures follow the GPT: the same 15 epochs over twice the lines (twice the steps) cut lines short and laugh where an ellipsis was, while SoVITS needs its 8 epochs for the timbre. So `voice train` gives the GPT about 850 steps whatever the bank's size (`GPT_STEPS`), and with that more data helps.
 
+### Singing
+
+Measured on 楽園PROJECT (sung by Ray; the TV size from ep01 and the single, whose track 3 is the official instrumental), per 3 s window of the converted vocal against the dry lead it came from: RMVPE pitch, harmonics-to-noise ratio (HNR) by note, speaker-embedding cosine to Momo's bank. Pitch is never the problem (median 10–13 cents, no window 50 cents off); what the ear hears as metallic, slurred or fake high notes shows as lost HNR, mostly below 400 Hz and above 600 Hz, outside her speaking range. DNSMOS does not tell the versions apart on singing, and Whisper loops on some sung chunks, so neither decides.
+
+| single, RoFormer dry lead | HNR lost: all / low / mid / high (dB) | likeness |
+|---|---|---|
+| fine-tuned 800 steps on 12 min, longest lines as reference | 1.3 / 3.3 / 0.0 / 4.0 | 0.48 |
+| fine-tuned 1500 steps on 27 min, longest lines | 2.1 / 3.0 / 1.3 / 4.9 | 0.52 |
+| same, her highest-pitched lines as reference | 4.4 / 5.4 / 3.5 / 7.4 | 0.31 |
+| same, her clearest lines as reference | 0.1 / 1.0 / −0.3 / 2.0 | 0.51 |
+
+The source Ray's own voice scores 0.16 likeness. Seed-VC copies the reference's texture: her high lines are shouts, and made the singing noisier and less like her; her clearest calm lines made it as clean as the source at no cost in likeness. So `voice cover` builds its reference from her clearest bank lines (`cover.clarity`, a numpy HNR that ranks her bank as the RMVPE one does). Fine-tuning on more speech makes her timbre stronger but the high notes worse: the model has never heard her sing.
+
 Voice banks, models and generated speech stay in the data directory and are never shared.
