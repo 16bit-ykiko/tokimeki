@@ -23,7 +23,7 @@ from tokimeki.voice import speakers
 from tokimeki.voice import transcripts as transcripts_stage
 from tokimeki.voice.asr import MODEL_REPO as ASR_MODEL
 from tokimeki.voice.bank import BankError
-from tokimeki.voice.engines import gpt_sovits, seed_vc
+from tokimeki.voice.engines import gpt_sovits, seed_vc, separator
 from tokimeki.voice.engines.venv import EngineError
 from tokimeki.voice.store import (
     clean_voices,
@@ -463,8 +463,10 @@ def cmd_voice_install(args: argparse.Namespace) -> int:
     try:
         if engine == gpt_sovits.NAME:
             gpt_sovits.install(gpt_sovits.Engine.default())
-        else:
+        elif engine == seed_vc.NAME:
             seed_vc.install(seed_vc.Engine.default())
+        else:
+            separator.install(separator.Engine.default())
     except EngineError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -771,7 +773,7 @@ def build_parser() -> argparse.ArgumentParser:
         "install", help="install an external engine in its own venv (network)"
     )
     vinstall.set_defaults(handler=cmd_voice_install)
-    vinstall.add_argument("engine", choices=(gpt_sovits.NAME, seed_vc.NAME))
+    vinstall.add_argument("engine", choices=(gpt_sovits.NAME, seed_vc.NAME, separator.NAME))
     vtrain = voice_command(
         "train", cmd_voice_train, "fine-tune GPT-SoVITS on a character's bank (whole GPU)"
     )

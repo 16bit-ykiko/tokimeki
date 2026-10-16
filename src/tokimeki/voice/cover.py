@@ -1,8 +1,11 @@
 """A song sung in a character's voice (an "AI cover"), for listening on this machine only.
 
-The song's vocal is separated from the mix with MDX-Net, sung again in her voice by Seed-VC
-(fine-tuned on her bank, or zero-shot from it), and mixed back over the accompaniment: the
-release's own instrumental when there is one (aligned to the mix), otherwise what MDX-Net left.
+The song's lead vocal is separated from the mix, sung again in her voice by Seed-VC (fine-tuned
+on her bank, or zero-shot from it) and mixed back over the accompaniment: the release's own
+instrumental when there is one (aligned to the mix), otherwise what separation left. With the
+`audio-separator` engine installed, RoFormer models take the lead apart from the backing vocals
+and its reverb, and only the dry lead is converted (the backing vocals stay, quieter); without
+it, MDX-Net's whole vocal is.
 """
 
 import json
@@ -17,7 +20,7 @@ from tokimeki.media.audio import decode_audio, encode_audio
 from tokimeki.models.gpu import loaded
 from tokimeki.models.separation import SAMPLE_RATE, VocalSeparator
 from tokimeki.voice.bank import bank_lines
-from tokimeki.voice.engines import seed_vc
+from tokimeki.voice.engines import seed_vc, separator
 from tokimeki.voice.engines.seed_vc import Conversion, Engine
 from tokimeki.voice.paths import bank_dir, character_dir, model_dir
 
@@ -33,6 +36,8 @@ ALIGN_RATE = 1000
 MAX_SHIFT = 3.0
 """Seconds the instrumental may be offset from the mix on the disc."""
 PEAK = 0.98
+BACKING = 0.6
+"""Gain of the original backing vocals under her lead."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +59,7 @@ class CoverReport:
     vocal: str
     seconds: float
     model: str
+    separation: str
     reference_lines: list[int]
     instrumental_offset: float | None
 
@@ -131,6 +137,17 @@ def aligned(track: NDArray[np.float32], lag: float, length: int) -> NDArray[np.f
     return out
 
 
+def fitted(track: NDArray[np.float32], length: int) -> NDArray[np.float32]:
+    """`track` (channels first) cut or padded with silence to `length` samples."""
+    if track.shape[-1] >= length:
+        return track[..., :length]
+    return np.pad(track, [(0, 0)] * (track.ndim - 1) + [(0, length - track.shape[-1])])
+
+
+def rms(samples: NDArray[np.float32]) -> float:
+    return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+
+
 def mix(
     vocal: NDArray[np.float32], accompaniment: NDArray[np.float32], loudness: float
 ) -> NDArray[np.float32]:
@@ -158,16 +175,30 @@ def cover(
     root = character_dir(ctx.paths, character) / "covers" / name
     root.mkdir(parents=True, exist_ok=True)
     mixture = song.decode()
-    with loaded("MDX-Net", VocalSeparator) as separator:
-        vocal = separator.separate(mixture)
+    length = mixture.shape[1]
+    roformer = separator.Engine.default()
+    if roformer.installed():
+        encode_audio(mixture, SAMPLE_RATE, root / "song.wav")
+        with loaded("RoFormer", _Idle):
+            stems = separator.separate(roformer, root / "song.wav", root / "stems")
+        (root / "song.wav").unlink()
+        dry = fitted(decode_audio(stems.lead_dry, SAMPLE_RATE), length)
+        loudness = rms(decode_audio(stems.lead, SAMPLE_RATE))
+        rest = fitted(decode_audio(stems.instrumental, SAMPLE_RATE, channels=2), length)
+        backing = fitted(decode_audio(stems.backing, SAMPLE_RATE, channels=2), length)
+    else:
+        with loaded("MDX-Net", VocalSeparator) as mdx:
+            vocal = mdx.separate(mixture)
+        dry = vocal.mean(axis=0)
+        loudness = rms(dry)
+        rest = mixture - vocal
+        backing = np.zeros_like(mixture)
     lag: float | None = None
     if instrumental is not None:
-        backing = instrumental.decode()
-        lag = offset(mixture - vocal, backing)
-        accompaniment = aligned(backing, lag, mixture.shape[1])
-    else:
-        accompaniment = mixture - vocal
-    dry = vocal.mean(axis=0)
+        official = instrumental.decode()
+        lag = offset(rest, official)
+        rest = aligned(official, lag, length)
+    accompaniment = (rest + BACKING * backing).astype(np.float32)
     encode_audio(dry[None], SAMPLE_RATE, root / "original-vocal.wav")
     used = reference_clip(ctx, character, root / "reference.wav")
     checkpoint = model_dir(ctx.paths, character, seed_vc.NAME) / "ft_model.pth"
@@ -176,7 +207,6 @@ def cover(
     with loaded("Seed-VC", _Idle):
         sung = seed_vc.convert(engine, job, model, root / "vocal.wav")
     converted = decode_audio(sung, SAMPLE_RATE)
-    loudness = float(np.sqrt(np.mean(dry.astype(np.float64) ** 2)))
     out = root / "cover.flac"
     encode_audio(mix(converted, accompaniment, loudness), SAMPLE_RATE, out)
     report = CoverReport(
@@ -185,6 +215,7 @@ def cover(
         str(sung),
         round(mixture.shape[1] / SAMPLE_RATE, 1),
         "fine-tuned" if model else "zero-shot",
+        "roformer" if roformer.installed() else "mdx-net",
         used,
         lag,
     )
@@ -193,7 +224,7 @@ def cover(
 
 
 class _Idle:
-    """Holds the in-process GPU slot while a Seed-VC subprocess uses the card."""
+    """Holds the in-process GPU slot while an engine's subprocess uses the card."""
 
     def close(self) -> None:
         pass

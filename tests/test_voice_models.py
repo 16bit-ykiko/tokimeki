@@ -15,10 +15,10 @@ from tokimeki.media.audio import decode_audio, encode_audio
 from tokimeki.models.separation import SAMPLE_RATE
 from tokimeki.voice import speakers, transcripts
 from tokimeki.voice.bank import BankError, bank_lines, export_bank, faded, letters
-from tokimeki.voice.cover import aligned, clarity, mix, offset, reference_clip
-from tokimeki.voice.engines import gpt_sovits
+from tokimeki.voice.cover import aligned, clarity, fitted, mix, offset, reference_clip
+from tokimeki.voice.engines import gpt_sovits, separator
 from tokimeki.voice.engines.gpt_sovits import Engine, Request, TrainSettings
-from tokimeki.voice.engines.venv import SHARED
+from tokimeki.voice.engines.venv import SHARED, EngineError
 from tokimeki.voice.samples import parse_new
 from tokimeki.voice.store import find_speaker
 from tokimeki.voice.store import transcripts as stored_transcripts
@@ -150,6 +150,20 @@ def test_reference_takes_her_clearest_lines_first(
     encode_audio((clean + hiss)[None], SAMPLE_RATE, root / "wavs" / noisy.wav)
     used = reference_clip(ctx, "梦梦", tmp_path / "reference.wav")
     assert sorted(used) == sorted(x.line for x in lines) and used[-1] == noisy.line
+
+
+def test_roformer_steps_separate_what_an_earlier_step_kept(tmp_path: Path) -> None:
+    kept = {"song"}
+    for _, source, names in separator.STEPS:
+        assert source in kept
+        kept |= set(names.values())
+    assert {"instrumental.wav", "lead.wav", "lead_dry.wav", "backing.wav"} <= kept
+    engine = separator.Engine(tmp_path)
+    assert not engine.installed()
+    with pytest.raises(EngineError, match="not installed"):
+        separator.separate(engine, tmp_path / "song.wav", tmp_path / "stems")
+    assert fitted(np.ones((2, 5), dtype=np.float32), 3).shape == (2, 3)
+    assert fitted(np.ones(3, dtype=np.float32), 5).tolist() == [1, 1, 1, 0, 0]
 
 
 def test_instrumental_is_aligned_to_the_mix_and_the_vocal_mixed_in() -> None:
